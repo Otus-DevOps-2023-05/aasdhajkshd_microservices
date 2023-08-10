@@ -33,11 +33,11 @@ Don't run Bundler as root. Bundler can ask for sudo if it is needed, and
 installing your bundle as root will break this application for all non-root
 ___
 NAME          ACTIVE   DRIVER    STATE     URL                          SWARM   DOCKER    ERRORS
-docker-host   *        generic   Running   tcp://158.160.104.118:2376           v24.0.2   
+docker-host   *        generic   Running   tcp://158.160.104.118:2376           v24.0.2
 CONTAINER ID   IMAGE           COMMAND       CREATED          STATUS          PORTS     NAMES
 d7d181129d3d   reddit:latest   "/start.sh"   54 seconds ago   Up 52 seconds             reddit
 NAME          ACTIVE   DRIVER    STATE     URL                          SWARM   DOCKER    ERRORS
-docker-host   *        generic   Running   tcp://158.160.104.118:2376           v24.0.2   
+docker-host   *        generic   Running   tcp://158.160.104.118:2376           v24.0.2
 <!DOCTYPE html>
 <html lang='en'>
 <head>
@@ -97,7 +97,7 @@ docker-host   *        generic   Running   tcp://158.160.104.118:2376           
 </html>
 
 
-Загрузка самого докера в github.com 
+Загрузка самого докера в github.com
 https://hub.docker.com/repository/docker/23f03013e37f/otus-reddit/general
 
 [/bin/sh -c #(nop)  CMD ["/start.sh"]]
