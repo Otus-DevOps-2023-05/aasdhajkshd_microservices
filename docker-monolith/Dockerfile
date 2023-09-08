@@ -1,7 +1,7 @@
 FROM ubuntu:18.04
 
 RUN apt-get update -y
-RUN apt-get install -y mongodb-server ruby-full ruby-dev build-essential git
+RUN apt-get install -y mongodb-server ruby-full ruby-dev build-essential git telnet iputils-ping iputils-tracepath apt-file
 RUN gem install bundler -v 2.3.26
 RUN git clone -b monolith https://github.com/express42/reddit.git
 

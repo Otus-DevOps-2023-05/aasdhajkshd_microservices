@@ -1,0 +1,30 @@
+{
+    "builders": [
+        {
+            "type": "yandex",
+            "service_account_key_file": "{{ user `key_file` }}",
+            "folder_id": "{{ user `folder_id` }}",
+            "source_image_family": "{{ user `image` }}",
+            "image_name": "docker-base-{{timestamp}}",
+            "image_family": "docker-base",
+            "platform_id": "{{ user `platform_id` }}",
+            "instance_cores": "2",
+            "zone":      "ru-central1-a",
+            "use_ipv4_nat": "true",
+            "use_internal_ip": "false",
+            "max_retries": "5",
+            "disk_size_gb": "20",
+            "ssh_username": "{{ user `ssh_user` }}"
+        }
+    ],
+    "provisioners": [
+
+        {
+            "type": "ansible",
+            "extra_arguments": ["-vv", "--ssh-extra-args", "-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa"],
+            "playbook_file": "ansible/playbooks/packer_docker.yml",
+            "user": "{{user `ssh_user`}}",
+            "ansible_env_vars": ["ANSIBLE_CONFIG=ansible/ansible.cfg", "ANSIBLE_PIPELINING=true"]
+        }
+    ]
+}
