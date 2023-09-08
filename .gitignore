@@ -20,7 +20,7 @@ override.tf
 *_override.tf.json
 override.tf.json
 *.save
-**/.secrets/*
+/.secrets/*
 secrets.*
 .*.swp
 .terraform/

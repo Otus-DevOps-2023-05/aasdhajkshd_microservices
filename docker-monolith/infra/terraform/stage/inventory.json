@@ -1,11 +1,11 @@
 {
   "all": {
     "hosts": {
-      "docker-0": {
-        "ansible_host": "62.84.115.190"
+      "docker-0" : {
+        "ansible_host": "84.201.159.173"
       },
-      "docker-1": {
-        "ansible_host": "51.250.73.22"
+      "docker-1" : {
+        "ansible_host": "62.84.125.170"
       }
     }
   }
