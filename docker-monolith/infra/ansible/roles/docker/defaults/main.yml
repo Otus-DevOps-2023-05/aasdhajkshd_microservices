@@ -1,0 +1,4 @@
+---
+docker_compose_version: 2.20.3
+ssh_user: ubuntu
+env: local

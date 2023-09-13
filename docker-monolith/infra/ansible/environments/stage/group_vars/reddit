@@ -1,0 +1,2 @@
+db_host: 127.0.0.1
+mongo_bind_ip: 0.0.0.0

@@ -1,0 +1,4 @@
+---
+- name: Docker Compose Standalone version
+  become: false
+  command: /usr/local/bin/docker-compose version

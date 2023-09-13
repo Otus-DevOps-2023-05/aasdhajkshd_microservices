@@ -1,0 +1,7 @@
+---
+- name: Install docker base image
+  hosts: all
+  remote_user: "{{ ssh_user }}"
+  become: true
+  roles:
+    - docker

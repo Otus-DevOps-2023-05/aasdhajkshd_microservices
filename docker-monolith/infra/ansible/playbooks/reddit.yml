@@ -1,0 +1,13 @@
+---
+- name: Start app docker
+  hosts: all
+  become: true
+  tasks:
+  - name: Start docker
+    docker_container:
+      name: reddit
+      image: 23f03013e37f/otus-reddit:1.0
+      ports:
+        - "9292:9292"
+      state: started
+      restart: yes
