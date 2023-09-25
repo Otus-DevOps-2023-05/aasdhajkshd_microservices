@@ -1,0 +1,61 @@
+---
+- name: Install dependencies
+  apt:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+    update_cache_retries: 3
+    install_recommends: false
+  loop:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - wget
+    - gnupg
+    - net-tools
+    - bridge-utils
+- name: Add GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+- name: Add docker repository to apt
+  apt_repository:
+    repo: deb https://download.docker.com/linux/ubuntu {{ os_version_codename }} stable
+    state: present
+- name: Install docker
+  apt:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+  loop:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+- name: Check docker is active
+  service:
+    name: docker
+    state: started
+    enabled: true
+- name: Ensure group "docker" exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+- name: Adding ubuntu to docker group
+  user:
+    name: "{{ ssh_user }}"
+    groups: docker
+    append: yes
+- name: Install docker-compose
+  get_url:
+    url: https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64
+    dest: /usr/local/bin/docker-compose
+    mode: 'u+rwx,g+rx'
+  notify: Docker Compose Standalone version
+- name: Change file ownership, group and permissions
+  ansible.builtin.file:
+    path: /usr/local/bin/docker-compose
+    owner: "{{ ssh_user }}"
+    group: docker
+    mode: "0755"

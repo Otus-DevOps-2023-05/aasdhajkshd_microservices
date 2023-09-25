@@ -1,0 +1,8 @@
+---
+docker_volume:
+  - /srv/gitlab/config
+  - /srv/gitlab/data
+  - /srv/gitlab/logs
+  - /srv/gitlab-runner/config
+gitlab_email: administrator@example.com
+gitlab_pass: 12345678

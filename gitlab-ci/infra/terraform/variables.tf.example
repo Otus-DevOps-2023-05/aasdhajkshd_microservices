@@ -1,0 +1,41 @@
+variable "service_account_key_file" {
+  type        = string
+  description = "Key .json"
+}
+
+variable "cloud_id" {
+  type        = string
+  description = "Cloud"
+}
+
+variable "folder_id" {
+  type        = string
+  description = "Folder"
+}
+
+variable "zone" {
+  type        = string
+  description = "Zone"
+  default     = "ru-central1-a"
+}
+
+variable "public_key_path" {
+  type        = string
+  description = "Path to the public key used for ssh access"
+}
+
+variable "private_key_path" {
+  type        = string
+  description = "Path to the private key used for ssh access"
+}
+
+variable "docker_image_id" {
+  type        = string
+  description = "Disk image of docker"
+  default = "docker-image-base"
+}
+
+variable "subnet_id" {
+  type        = string
+  description = "Subnets for modules"
+}
