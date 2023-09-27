@@ -6,9 +6,177 @@ aasdhajkshd microservices repository
 * [docker-2 Технология контейнеризации. Введение в Docker](#hw16)
 * [docker-3 Docker-образы Микросервисы](#hw17)
 * [docker-4 Docker сети, docker-compose](#hw18)
-* [gitlab-ci-1 Устройство Gitlab CI. Построение процесса непрерывной поставки](#hw19)
+* [gitlab-ci-1 Устройство Gitlab CI. Построение процесса непрерывной поставки](#hw20)
+* [Введение в мониторинг. Системы мониторинга.](#hw22)
 
-## <a name="hw19">Устройство Gitlab CI. Построение процесса непрерывной поставки</a>
+## <a name="hw22">Введение в мониторинг. Системы мониторинга.</a>
+
+#### Выполненные работы
+
+1. Создан Docker хост в Yandex Cloud и настроено локальное окружение на работу с ним Docker хост в Yandex Cloud и инициализировано окружение Docker, выполнен запуск Prometheus в контейнере
+```bash
+DOCKER_MACHINE="$(yc compute instance create \
+ --name docker-host \
+ --zone ru-central1-a \
+ --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+ --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-2204-lts,size=15 \
+ --ssh-key ~/.ssh/id_rsa-appuser.pub \
+ | awk '/nat:/ { getline; print $2}')"
+
+docker-machine create \
+ --driver generic \
+ --generic-ip-address=$(yc compute instance list --format json | jq '.[] | select (.name == "docker-host") | .network_interfaces[0].primary_v4_address.one_to_one_nat.address' | tr -d '"') \
+ --generic-ssh-user yc-user \
+ --generic-ssh-key ~/.ssh/id_rsa-appuser \
+ docker-host
+
+docker-machine ls
+eval $(docker-machine env docker-host)
+docker run --rm -p 9090:9090 -d --name prometheus prom/prometheus
+```
+```output
+> docker-machine ls
+NAME          ACTIVE   DRIVER    STATE     URL                         SWARM   DOCKER    ERRORS
+docker-host   *        generic   Running   tcp://158.160.123.87:2376           v24.0.2
+
+> docker ps
+CONTAINER ID   IMAGE             COMMAND                  CREATED         STATUS         PORTS                                       NAMES
+c42e3a0e47f9   prom/prometheus   "/bin/prometheus --c…"   5 minutes ago   Up 5 minutes   0.0.0.0:9090->9090/tcp, :::9090->9090/tcp   prometheus
+```
+2. В корне репозитория созданы файлы monitoring/prometheus/Dockerfile и monitoring/prometheus/prometheus.yml и там же собран сам образ и образы для микросервисного приложения
+```bash
+export USER_NAME=23f03013e37f
+docker build -t $USER_NAME/prometheus monitoring/prometheus/
+for i in ui post-py comment; do cd src/$i; bash docker_build.sh; cd -; done
+```
+```output
+$ docker images
+REPOSITORY                TAG             IMAGE ID       CREATED          SIZE
+23f03013e37f/prometheus   latest          0ff4f47eb4aa   8 minutes ago    112MB
+23f03013e37f/ui           1.0             10ca006c2cd7   26 minutes ago   482MB
+23f03013e37f/post         1.0             0c9b91c66d82   28 minutes ago   292MB
+23f03013e37f/comment      1.0             3837a3a99d37   28 minutes ago   313MB
+<none>                    <none>          e930e723c43c   4 hours ago      313MB
+prom/prometheus           latest          9c703d373f61   2 weeks ago      245MB
+mongo                     4.4.24          a701426e0e61   4 weeks ago      432MB
+```
+3. Добавлен сервис *prometheus*'а в *docker\docker-compose.yml* и удалены build инструкции, так как образы были собраны выше
+4. Выполнен запуск сервисов
+```bash
+docker-compose up -d
+```
+![](img/Screenshot_20230927_042702.png)
+
+#### Мониторинг состояния микросервисов
+1. Ниже список endpoint'ов
+![](img/Screenshot_20230927_042529.png)
+2. Проверка работы
+![](img/Screenshot_20230927_043223.png)
+
+#### Сбор метрик хоста
+1. В файлы *docker\docker-compose.yml* и *monitoring/prometheus/prometheus.yml* внсенена информация по новому сервису - node-exporter. Перезапущены сервисы.
+2. В списке Status/Targets'ов новый узел
+![](img/Screenshot_20230927_044159.png)
+3. Ведется сбор данных
+![](img/Screenshot_20230927_044434.png)
+4. Проверка мониторинга
+![](img/Screenshot_20230927_044705.png)
+5. Образы загружены на DockerHub и доступны по ссылкам
+> https://hub.docker.com/repository/docker/23f03013e37f/ui
+> https://hub.docker.com/repository/docker/23f03013e37f/comment
+> https://hub.docker.com/repository/docker/23f03013e37f/post
+> https://hub.docker.com/repository/docker/23f03013e37f/prometheus
+
+#### Задания со *star*
+> Добавить в Prometheus мониторинг MongoDB с использованием необходимого экспортера
+1. Для добавления в Prometheus мониторинга ДБ MongoDB был выбран данный актуальный проект
+> https://hub.docker.com/r/percona/mongodb_exporter
+2. В *docker/docker-compose.yml* файл добавлен сервис:
+```yml
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.39.0
+    command:
+      - '--mongodb.uri=mongodb://post_db:27017'
+    networks:
+      - back_net
+```
+3. В файл *monitoring/prometheus/prometheus.yml* добавлен endpoint:
+```yml
+  - job_name: 'mongodb-node-exporter'
+    static_configs:
+      - targets:
+        - 'mongodb-exporter:9216'
+```
+4. Результат доступных mongodb метрик
+![](img/Screenshot_20230927_073457.png)
+![](img/Screenshot_20230927_073611.png)
+
+#### Задания со *star*
+> Добавить в Prometheus мониторинг сервисов comment, post, ui с помощью blackbox exporter.
+1. В директории monitoring/blackbox созданы файлы настроек *blackbox.yml* с модулем http_2xx и Dockerfile
+```dockerfile
+FROM prom/blackbox-exporter:latest
+COPY ./blackbox.yml /etc/blackbox_exporter/config.yml
+```
+```yml
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []
+      method: GET
+      follow_redirects: false
+```
+2. В файл *prometheus.yml* добавлен блок работы
+```yml
+  - job_name: 'blackbox'
+    metrics_path: /metrics
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - http://prometheus.io
+        - http://ui:9292/new
+        - http://comment:9292
+        - http://post:9292
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+```
+1. В файл docker/docker-compose.yml добавлен сервис blackbox-exporter
+2. В файл monitoring\prometheus\prometheus.yml добавлен target для Cloudprober
+
+3. blackbox поднляся в prometheus
+![](img/Screenshot_20230927_113103.png)
+
+#### Задания со *star*
+> Напиcать Makefile
+1. В корне репозитария создан файл Makefile
+2. Возможные варианты запуска:
+- для получения списка команд
+```bash
+make help
+```
+- создания образов
+```bash
+make build-[ui|post|comment|prometheus|blackbox]
+```
+- push образов в docker.io
+```
+make push-[ui|post|comment|prometheus|blackbox]
+```
+- сборка или отправка всех образов
+```
+make [build|push]-all
+```
+
+## <a name="hw20">Устройство Gitlab CI. Построение процесса непрерывной поставки</a>
 
 #### Выполненные работы
 
@@ -197,8 +365,6 @@ build_job:
 Прохождение этапа формирования образа docker-in-docker (dind)
 ![](img/Screenshot_20230925_142047.png)
 ![](img/Screenshot_20230925_142118.png)
-
-
 
 ## <a name="hw18">Docker сети, docker-compose</a>
 
