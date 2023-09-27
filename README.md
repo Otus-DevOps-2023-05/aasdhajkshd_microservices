@@ -152,7 +152,7 @@ modules:
 1. В файл docker/docker-compose.yml добавлен сервис blackbox-exporter
 2. В файл *monitoring/prometheus/prometheus.yml* добавлен target для Cloudprober
 
-3. blackbox поднляся в prometheus
+3. blackbox запустился в Prometheus
 ![](img/Screenshot_20230927_113103.png)
 
 #### Задания со *star*
