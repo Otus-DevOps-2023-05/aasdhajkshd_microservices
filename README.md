@@ -60,7 +60,7 @@ REPOSITORY                TAG             IMAGE ID       CREATED          SIZE
 prom/prometheus           latest          9c703d373f61   2 weeks ago      245MB
 mongo                     4.4.24          a701426e0e61   4 weeks ago      432MB
 ```
-3. Добавлен сервис *prometheus*'а в *docker\docker-compose.yml* и удалены build инструкции, так как образы были собраны выше
+3. Добавлен сервис *prometheus*'а в *docker/docker-compose.yml* и удалены build инструкции, так как образы были собраны выше
 4. Выполнен запуск сервисов
 ```bash
 docker-compose up -d
@@ -74,7 +74,7 @@ docker-compose up -d
 ![](img/Screenshot_20230927_043223.png)
 
 #### Сбор метрик хоста
-1. В файлы *docker\docker-compose.yml* и *monitoring/prometheus/prometheus.yml* внсенена информация по новому сервису - node-exporter. Перезапущены сервисы.
+1. В файлы *docker/docker-compose.yml* и *monitoring/prometheus/prometheus.yml* внсенена информация по новому сервису - node-exporter. Перезапущены сервисы.
 2. В списке Status/Targets'ов новый узел
 ![](img/Screenshot_20230927_044159.png)
 3. Ведется сбор данных
@@ -150,7 +150,7 @@ modules:
         replacement: blackbox-exporter:9115
 ```
 1. В файл docker/docker-compose.yml добавлен сервис blackbox-exporter
-2. В файл monitoring\prometheus\prometheus.yml добавлен target для Cloudprober
+2. В файл *monitoring/prometheus/prometheus.yml* добавлен target для Cloudprober
 
 3. blackbox поднляся в prometheus
 ![](img/Screenshot_20230927_113103.png)
