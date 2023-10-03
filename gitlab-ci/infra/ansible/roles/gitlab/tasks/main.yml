@@ -1,0 +1,75 @@
+---
+- name: Wait for the connection
+  ansible.builtin.wait_for_connection:
+    timeout: 1200
+- name: This is Gitlab
+  ansible.builtin.debug:
+    msg: "Our fruit is Gitlab"
+    verbosity: 2
+- name: Gathering facts
+  setup:
+    gather_subset:
+      - "!all"
+      - network
+- name: Print inventory_hostname
+  ansible.builtin.debug:
+    var: inventory_hostname
+- name: Print ansible_hostname
+  ansible.builtin.debug:
+    var: ansible_hostname
+- name: Print ansible_fqdn
+  ansible.builtin.debug:
+    var: ansible_fqdn
+- name: Creates directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ ssh_user }}"
+    group: docker
+    state: directory
+    mode: "0755"
+  with_items:
+    "{{ docker_volume }}"
+- name: "Creating a docker-compose.yml"
+  template:
+    src: docker-compose.yml.j2
+    dest: "/srv/gitlab/docker-compose.yml"
+  notify:
+    - Start docker-compose gitlab
+- name: Add gitlab container
+  community.docker.docker_container:
+    name: gitlab
+    image: 'gitlab/gitlab-ce:latest'
+    restart_policy: always
+    state: started
+    hostname: 'gitlab.example.com'
+    env:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url "http://{{ hostvars[inventory_hostname].ansible_host }}"
+        GITLAB_ROOT_EMAIL="{{ gitlab_email }}"
+        GITLAB_ROOT_PASSWORD="{{ gitlab_pass }}"
+    ports:
+      - '80:80'
+      - '443:443'
+      - '2222:22'
+    volumes:
+      - '{{docker_volume[0]}}:/etc/gitlab'
+      - '{{docker_volume[2]}}:/var/log/gitlab'
+      - '{{docker_volume[1]}}:/var/opt/gitlab'
+    shm_size: "256m"
+- name: Get container info
+  community.docker.docker_container_info:
+    name: gitlab
+  register: gitlab_status
+- name: Print information about container
+  ansible.builtin.debug:
+    var: gitlab_status.container.State.Health.Status }}"
+  when: gitlab_status.exists
+- name: Wait for port 80
+  ansible.builtin.wait_for:
+    host: 0.0.0.0
+    port: 80
+    state: present
+    timeout: 300
+- name: Initial root password
+  become: true
+  command: cat /srv/gitlab/config/initial_root_password

@@ -1,0 +1,40 @@
+---
+- name: Install docker base image
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    docker_volume: "/srv/gitlab-runner/config"
+    access_token: "glpat-sQCd3Svbz_s87-Amx3oE"
+    reg_token: "glrt-gvwy3ZeaWb8e6PGfPsPy"
+  tasks:
+    - name: Install required packages
+      apt:
+        name: "{{ item }}"
+        state: latest
+        update_cache: true
+        update_cache_retries: 3
+        install_recommends: false
+      loop:
+        - python3-gitlab
+    - name: Add gitlab-runner container
+      community.docker.docker_container:
+        name: gitlab-runner
+        image: 'gitlab/gitlab-runner:latest'
+        restart_policy: always
+        state: started
+        volumes:
+          - '{{ docker_volume }}:/etc/gitlab-runner'
+          - /var/run/docker.sock:/var/run/docker.sock
+    - name: Register gitlab-runner
+      gitlab_runner:
+        api_url: "http://{{ hostvars[inventory_hostname].ansible_host }}"
+        api_token: "{{ access_token }}"
+        registration_token: "{{ reg_token }}"
+        description: Docker Runner
+        state: present
+        active: True
+        tag_list: ['linux', 'xenial', 'ubuntu', 'docker']
+        run_untagged: True
+        locked: False
+        project: homework/example

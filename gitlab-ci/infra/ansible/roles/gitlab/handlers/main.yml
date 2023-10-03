@@ -1,0 +1,9 @@
+---
+- name: Start docker-compose gitlab
+  become: false
+  command: echo "/usr/local/bin/docker-compose up --file /srv/gitlab/docker-compose.yml -d"
+
+- name: Reboot docker
+  become: true
+  ansible.builtin.reboot:
+    reboot_timeout: 3600

@@ -1,0 +1,8 @@
+---
+- name: Install docker base image
+  hosts: all
+  become: true
+  gather_facts: false
+  remote_user: "{{ ssh_user }}"
+  roles:
+    - gitlab

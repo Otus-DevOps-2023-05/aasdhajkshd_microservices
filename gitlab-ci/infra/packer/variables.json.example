@@ -1,0 +1,11 @@
+{
+  "key_file": "key.json",
+  "folder_id": "b1g0da3u1gqk0nansi59",
+  "subnet_id": "e9bi9oji8ljojstbt6cp",
+  "platform_id": "standard-v1",
+  "image": "ubuntu-2204-lts",
+  "image_name": "docker-base-{{timestamp}}",
+  "image_family": "docker-base",
+  "ssh_user": "ubuntu",
+  "ssh_key": "~/.ssh/id_rsa-appuser.pub"
+}
