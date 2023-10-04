@@ -15,7 +15,7 @@ aasdhajkshd microservices repository
 
 #### Выполненные работы
 
-1. Выполнены разбор на практике всех компонентов Kubernetes
+1. Выполнены изучение и разбор на практике всех компонентов Kubernetes
 
 Список литературы и статей:
 
@@ -46,11 +46,11 @@ error execution phase preflight: [preflight] Some fatal errors occurred:
 To see the stack trace of this error execute with --v=5 or higher
 ```
 
-> Если взять версию kube* бинарных файлов версий 1.19.04 и запустить на 16.04, возникает другая ошибка при инициализации с *containerd* сервисом, если добавить SystemdCgroups.
+> Если взять версию kube* бинарных файлов версий 1.19.04 и запустить на 16.04, возникает другая ошибка при инициализации с *containerd* сервисом, если добавить SystemdCgroups. Старая версия *containerd* docker'а для xenial не поддерживает этот параметр.
 >
 > Несмотря на то, что в репозитории google *https://packages.cloud.google.com/apt/dists/kubernetes-xenial* доступны пакеты для Ubuntu 16.04, установка выполняется успешно и на Focal 20.04 и работает с версией 1.6.24 пакета *containerd*
 >
-> Версии kubernetes 1.28 не зависят от *dockershirm*'а и поэтому можно только устанавливать *containerd.io*
+> Версии kubernetes 1.28 не зависят от *dockershirm*'а и поэтому можно только устанавливать *containerd.io*. Но для удобства использовался docker-machine, то отдельно роль docker'а не менялась, перенесена из gitlab'а, но является основной для проверки и установки зависимых компонентов для ВМ. А роль kubernetes требует роль docker (для проверки зависимостей).
 >
 > https://kubernetes.io/docs/setup/production-environment/container-runtimes/
 >
@@ -201,7 +201,7 @@ EOF
 kubeadm init --config /etc/kubernetes/kubeadm-config.yaml
 ```
 
-4. Вывод команды выше *kubeadm init...*
+4. Вывод команды выше: *kubeadm init...*
 
 ```output
 [init] Using Kubernetes version: v1.28.2
@@ -292,7 +292,7 @@ kubeadm join 158.160.126.171:6443 --token 1762id.yjr59ik6xf3oquog \
 kubeadm token create --print-join-command
 ```
 
-Вывод команды добавления
+Вывод команды добавления:
 
 ```output
 [preflight] Running pre-flight checks
@@ -327,7 +327,7 @@ sed -i -r -e 's/^([ ]+)# (- name: CALICO_IPV4POOL_CIDR)$\n/\1\2\n\1  value: "10.
 kubectl apply -f calico.yaml
 ```
 
-Вывод команды *kubectl apply -f calico.yaml*
+Вывод команды: *kubectl apply -f calico.yaml*
 
 ```output
 poddisruptionbudget.policy/calico-kube-controllers created
@@ -341,7 +341,7 @@ daemonset.apps/calico-node created
 deployment.apps/calico-kube-controllers created
 ```
 
-Вывод команды *kubectl get nodes*
+Вывод команды: *kubectl get nodes*
 
 ```output
 NAME         STATUS   ROLES           AGE    VERSION
@@ -349,7 +349,7 @@ k8s-master   Ready    control-plane   69m    v1.28.2
 k8s-worker   Ready    <none>          2m6s   v1.28.2
 ```
 
-Вывод команды *kubectl get pods -A -o custom-columns=NAME:.metadata.name,IP:.status.podIP,NAME:.spec.nodeName*
+Вывод команды: *kubectl get pods -A -o custom-columns=NAME:.metadata.name,IP:.status.podIP,NAME:.spec.nodeName*
 
 ```output
 NAME                                       IP            NAME
@@ -380,7 +380,17 @@ post-deployment-68db465f9c-lmcv7   1/1     Running   0          2m11s
 
 1. Выполнены различные варианты автоматической установки кластера k8s с помощью terraform и ansible.
 
-Packer и ansible: в директории *infra/packer* располагается конфигуарция в hcl формате для подготовки "золотого" образа, а для установки ПО используется playbook *infra/ansible/playbooks/k8s_install.yml*. Данный playbook использует ранее уже созданный из предыдущего ДЗ установку docker'а и вторым шагом установку после kubernetes. Packer создает в последствии manifest файл *infra/terraform/stage/packer.auto.tfvars.json*, в котором есть id артификта образа. В terraform при создании ВМ можно его использовать, сделав замену в *infra/terraform/modules/kubernetes/main.tf*: ~~data.yandex_compute_image.img.id~~
+Packer и ansible: в директории *infra/packer* располагается конфигуарция в hcl формате для подготовки "золотого" образа, а для установки ПО используется playbook *infra/ansible/playbooks/k8s_install.yml*. Данный playbook использует ранее уже созданный из предыдущего ДЗ установку docker'а и вторым шагом установку после kubernetes. Packer создает в последствии manifest файл *infra/terraform/stage/packer.auto.tfvars.json*, в котором есть id артификта образа. В terraform при создании ВМ можно его использовать, сделав замену в *infra/terraform/modules/kubernetes/main.tf*:
+~~image_id = data.yandex_compute_image.img.id~~
+
+> Замечено, что если выполнять в облаке разворачивание ВМ с подготовленным диском, то необходмо в terraform внести изменения timeouts, так время занимает для network-ssd - 8 минут, для network-hdd - 15 минут, что превышает время по-умолчанию 5 минут. При использовании общедоступных образов - время составляет не более минуты, но на установку ПО ansible уходит то же время в итоге...
+
+```tf
+  timeouts {
+    create = "30m"
+    delete = "2h"
+  }
+```
 
 ```yaml
   boot_disk {
@@ -390,7 +400,9 @@ Packer и ansible: в директории *infra/packer* располагает
     }
   }
 ```
+
 Запустить packer можно из директории *kuternetes/infra:*
+
 
 ```bash
 packer build packer/
@@ -523,7 +535,7 @@ ansible-playbook playbooks/k8s_deploy.yml
 
 ```
 
-Ресурсы и статьи по Ansible помимо официального сайт, которые помогли с написанием playbook'ов:
+Ресурсы и статьи по Ansible помимо официального сайта, которые помогли с написанием playbook'ов:
 
 - https://github.com/geerlingguy/ansible-role-kubernetes/tree/master
 - https://spec-zone.ru/ansible~2.10/cli/ansible-playbook
