@@ -780,7 +780,7 @@ spec:
 PVC
 
 ```bash
-cat << EOF > mongo-pv.yml
+cat << EOF > mongo-volume.yml
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -801,13 +801,13 @@ EOF
 ```
 
 ```bash
-cat << EOF >> mongo-pvc.yml
+cat << EOF >> mongo-claim.yml
   volumeName: mongo-pv
 EOF
 ```
 
 ```bash
-kubectl create -n dev -f mongo-pvc.yml
+kubectl create -n dev -f mongo-claim.yml
 kubectl describe -n dev persistentvolumeclaim mongo-pvc
 kubectl describe -n dev persistentvolume mongo-pv
 ```
@@ -870,7 +870,7 @@ Events:                <none>
 ```bash
 yc compute disk delete --name mongo-disk; \
 yc compute disk create --name mongo-disk --size 2 --description "Disk for K8s"; \
-cat << EOF > mongo-pv.yml
+cat << EOF > mongo-volume.yml
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -888,7 +888,7 @@ spec:
   storageClassName: yc-network-hdd
 
 EOF
-kubectl apply -n dev -f mongo-pv.yml -f mongo-pvc.yml -f mongo-deployment.yml
+kubectl apply -n dev -f mongo-volume.yml -f mongo-claim.yml -f mongo-deployment.yml
 
 kubectl describe -n dev pod mongo
 ```
