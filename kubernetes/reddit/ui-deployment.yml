@@ -2,18 +2,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ui-deployment
+  name: ui
+  labels:
+    app: reddit
+    component: ui
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ui
+      app: reddit
+      component: ui
   template:
     metadata:
       name: ui
       labels:
-        app: ui
+        app: reddit
+        component: ui
     spec:
       containers:
-        - image: chromko/ui
-            name: ui
+      - name: ui
+        image: 23f03013e37f/ui
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: "1"

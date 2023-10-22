@@ -10,6 +10,929 @@ aasdhajkshd microservices repository
 * [gitlab-ci-1 Устройство Gitlab CI. Построение процесса непрерывной поставки](#hw20)
 * [monitoring-1 Введение в мониторинг. Системы мониторинга](#hw22)
 * [kubernetes-1 Введение в kubernetes](#hw27)
+* [kubernetes-3 Kubernetes. Networks, Storages](#hw30)
+
+## <a name="hw30">Введение в kubernetes</a>
+
+> <span style="color:red">INFO</span>
+<span style="color:blue">Информация на картинках, как IP адреса или время, может отличаться от приводимой в тексте! Суть в это не меняется.</span>
+
+#### Выполненные работы
+
+Список литературы и статей:
+
+- [Минимально жизнеспособный Kubernetes](https://habr.com/ru/companies/otus/articles/513344/)
+- [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way)
+- [Kubernetes и другие оркестраторы](https://habr.com/ru/companies/kts/articles/591355/)
+- [Yandex Managed Service для Kubernetes](https://cloud.yandex.ru/docs/managed-kubernetes/)
+- [Настройка групп безопасности](https://cloud.yandex.ru/docs/managed-kubernetes/operations/connect/security-groups)
+- [Сервисные аккаунты](https://cloud.yandex.ru/docs/iam/concepts/users/service-accounts)
+- [Обеспечение доступа к приложению, запущенному в кластере Kubernetes](https://cloud.yandex.ru/docs/managed-kubernetes/operations/create-load-balancer)
+- [Как начать работать с Network Load Balancer](https://cloud.yandex.ru/docs/network-load-balancer/quickstart)
+- [Проверка доступности ресурсов](https://cloud.yandex.ru/docs/network-load-balancer/concepts/health-check)
+- [Kubernetes DNS for Services and Pods](https://medium.com/kubernetes-tutorials/kubernetes-dns-for-services-and-pods-664804211501)
+- [Сетевые политики кластера Kubernetes](https://cloud.yandex.ru/docs/managed-kubernetes/concepts/network-policy)
+- [Использование объектов API Kubernetes](https://cloud.yandex.ru/docs/managed-kubernetes/concepts/volume)
+- [Create MongoDB server on Kubernetes with PersistentVolume](https://mazzine.medium.com/create-mongodb-server-on-kubernetes-with-persistentvolume-6cab32dde2fc)
+- [Динамическая подготовка тома](https://cloud.yandex.ru/docs/managed-kubernetes/operations/volumes/dynamic-create-pv)
+- [Управление классами хранилищ](https://cloud.yandex.ru/docs/managed-kubernetes/operations/volumes/manage-storage-class#sc-default)
+- [kubectl Cheat Sheet](https://kubernetes.io/docs/reference/kubectl/cheatsheet/)
+
+Абстракции над подами
+
+- [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment) — инструмент контроля за состоянием подов
+- [ReplicaSet](https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/) — запускает несколько подов
+- [DaemonSet](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/) — запускает строго один под на каждом узле кластера
+- [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/) — запускает нумерованные поды для stateful-приложений
+- [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/) — запускает под один раз, пока он не завершится успешно
+- [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) — запускает Job по крону (расписанию)
+
+Так как на странице **24** домашнего задания представлена картинка управлеяемого кластера, выполнение пунктов выполнялась с установкой Yandex Managed Service для Kubernetes кластере *infra-kube*.
+
+### Создание управляемого кластера для Kubernetes в YC
+
+1. Настройка групп безопасности
+
+```bash
+yc vpc security-group create --name yc-security-group --network-name default \
+--rule 'direction=ingress,port=443,protocol=tcp,v4-cidrs=0.0.0.0/0' \
+--rule 'direction=ingress,port=80,protocol=tcp,v4-cidrs=0.0.0.0/0' \
+--rule 'direction=ingress,from-port=0,to-port=65535,protocol=any,predefined=self_security_group' \
+--rule 'direction=ingress,from-port=0,to-port=65535,protocol=any,v4-cidrs=[10.96.0.0/16,10.112.0.0/16,10.128.0.0/16]' \
+--rule 'direction=ingress,from-port=0,to-port=65535,protocol=tcp,v4-cidrs=[198.18.235.0/24,198.18.248.0/24]' \
+--rule 'direction=egress,from-port=0,to-port=65535,protocol=any,v4-cidrs=0.0.0.0/0' \
+--rule 'direction=ingress,protocol=icmp,v4-cidrs=[10.0.0.0/8,192.168.0.0/16,172.16.0.0/12]' \
+--rule 'direction=ingress,from-port=30000,to-port=32670,protocol=tcp,v4-cidrs=0.0.0.0/0' \
+--rule 'direction=ingress,from-port=0,to-port=65535,protocol=tcp,predefined=loadbalancer_healthchecks'
+
+```
+
+2. Запишем в переменную `<id группы безопасности>`:
+
+```bash
+export SG_ID=$(yc vpc security-group get --name yc-security-group | head -1 | awk '{print $2}')
+echo $SG_ID
+```
+
+3. Создадим сервисный аккаунт для кластера Kubernetes:
+
+```bash
+YC_SVC_ACCT="kube-infra"
+YC_FOLDER_ID=$(yc config get folder-id)
+YC_SUBNET_ID=$(yc vpc subnet get default-ru-central1-a | head -1 | awk -F ': ' '{print $2}')
+YC_FOLDER_NAME="infra"
+
+yc iam service-account create kube-infra
+yc iam service-account create --name=$YC_SVC_ACCT --folder-id=$YC_FOLDER_ID
+
+YC_ACCT_ID=$(yc iam service-account get $YC_SVC_ACCT | grep ^id | awk '{print $2}')
+
+yc resource-manager folder add-access-binding \
+  --name=default \
+  --id=$YC_FOLDER_ID \
+  --folder_id=$YC_FOLDER_ID \
+  --service-account-id=$YC_ACCT_ID \
+  --role=editor
+
+yc iam key create --service-account-id=$YC_ACCT_ID \
+  --output=../../kubernetes/infra/.secrets/$YC_SVC_ACCT.json
+
+```
+
+4. Создаём публичный зональный кластер в зоне ru-central1-a:
+
+```bash
+yc managed-kubernetes cluster create \
+  --name=kube-infra \
+  --public-ip \
+  --network-name=default \
+  --service-account-name=$YC_SVC_ACCT \
+  --node-service-account-name=$YC_SVC_ACCT \
+  --release-channel=rapid \
+  --zone=ru-central1-a \
+  --version=1.27 \
+  --security-group-ids=$SG_ID \
+  --enable-network-policy \
+  --folder-name=$YC_FOLDER_NAME
+```
+
+5. Создаём рабочую группу из одного узла:
+
+> С помощью флага --preemptible будут создаваться прерываемые инстансы, которые намного дешевле обычных. [О таких инстансах](https://cloud.yandex.ru/docs/compute/concepts/preemptible-vm)
+
+```bash
+yc managed-kubernetes node-group create \
+  --name=kube-group \
+  --cluster-name=kube-infra \
+  --cores=2 \
+  --memory=4G \
+  --preemptible \
+  --auto-scale=initial=1,min=1,max=2 \
+  --network-interface=subnets=default-ru-central1-a,ipv4-address=nat,security-group-ids=$SG_ID \
+  --folder-name=$YC_FOLDER_NAME \
+  --metadata="ssh-keys=yc-user:~/.ssh/id_rsa-appuser.pub"
+```
+
+6. Получаем конфигигурацию и выполняем подключение:
+
+```bash
+yc managed-kubernetes cluster get-credentials --name=kube-infra --force --external
+```
+
+> В результате в файл `~/.kube/config` будут добавлены user, cluster, и context для подключения к кластеру в Yandex Cloud.
+
+> Данную команду нужно выполнять каждый раз после при запуска при динамическом внешнем адресе кластера:
+
+```bash
+yc managed-kubernetes cluster start kube-infra
+
+yc application-load-balancer load-balancer list --format json | jq -r '.[].id' | xargs -n1 yc application-load-balancer load-balancer start
+
+yc load-balancer network-load-balancer list --format json| jq -r '.[].id' | xargs -n1 yc load-balancer network-load-balancer start
+```
+
+7. Проверяем, что доступ есть и нода создалась:
+
+```bash
+kubectl get nodes
+```
+
+> Результат:
+
+```output
+NAME                        STATUS   ROLES    AGE   VERSION
+cl1vhjhn7vldqi2v6ucs-avys   Ready    <none>   37h   v1.27.3
+cl1vhjhn7vldqi2v6ucs-ytiw   Ready    <none>   37h   v1.27.3
+```
+
+```bash
+kubectl cluster-info
+```
+
+> Результат:
+
+```output
+Kubernetes control plane is running at https://158.160.100.194
+CoreDNS is running at https://158.160.100.194/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+```
+
+8. Конфигурация контекста
+
+```bash
+kubectl config current-context
+```
+
+> Результат:
+
+```output
+yc-kube-infra
+```
+
+9. Запустим reddit проект в `namespace dev`:
+
+> в манифестах используется из предыдущего домашнего задания *gitlab-ci* ранее подготовленные образы из [docker hub'а](https://hub.docker.com/repositories/23f03013e37f)
+
+```bash
+for i in `/usr/bin/ls dev-namespace.yml comment* mongo* post* ui*`; do kubectl apply -n dev -f $i; done
+```
+
+Но, так как ранее сервис базы данных и сервис фронтенда были разнесены по разным сетям, mongo ДБ недоступна по именам post-db и comment-db. В лог сервиса post наблюдаем такую ошибку:
+
+```output
+{"event": "find_all_posts", "level": "info", "message": "Successfully retrieved all posts from the database", "params": {}, "request_id": "93e56309-2e21-434f-a7e0-542b9c95ae85", "service": "post", "timestamp": "2023-10-20 21:14:24"}
+{"event": "internal_error", "level": "error", "method": "GET", "path": "/posts?", "remote_addr": "10.112.129.13", "request_id": "93e56309-2e21-434f-a7e0-542b9c95ae85", "service": "post", "timestamp": "2023-10-20 21:14:54", "traceback": "Traceback (most recent call last):
+...
+  File "/usr/local/lib/python3.6/site-packages/pymongo/topology.py", line 189, in select_servers
+    self._error_message(selector))
+pymongo.errors.ServerSelectionTimeoutError: post_db:27017: [Errno -2] Name does not resolve
+"}
+```
+
+В Kubernetes так добавить дополнительные имена: post-db и comment-db к *Deployment* mongo нет возможности, чтобы запись появилась в coredns Pod'е. Найдено два решения проблемы:
+
+- использовать переменные у comment и post
+
+```yaml
+spec:
+  env:
+  - name: COMMENT_DATABASE_HOST
+    value: mongo
+```
+
+- использовать сервис ExternalName
+
+```yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: post-db
+spec:
+  type: ExternalName
+  externalName: "mongo.dev.svc.cluster.local"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: comment-db
+spec:
+  type: ExternalName
+  externalName: "mongo.dev.svc.cluster.local"
+```
+
+До применения, имя *post-db* недоступно
+
+```bash
+kubectl exec -ti -n dev ui-cf9f76bc-8qwr4 -- /bin/bash
+root@ui-cf9f76bc-8qwr4:/app# ping post-db
+ping: unknown host post-db
+```
+
+После:
+
+![Pod ExternalName](img/Screenshot_20231021_111926.png)
+
+> Результат:
+
+```bash
+root@ui-cf9f76bc-8qwr4:/app# ping mongo
+PING mongo.dev.svc.cluster.local (10.96.241.0) 56(84) bytes of data.
+^C
+
+root@ui-cf9f76bc-8qwr4:/app# ping post-db
+PING mongo.dev.svc.cluster.local (10.96.241.0) 56(84) bytes of data.
+^C
+
+root@ui-cf9f76bc-8qwr4:/app# ping comment-db
+PING mongo.dev.svc.cluster.local (10.96.241.0) 56(84) bytes of data.
+^C
+
+```
+
+### DNS в Kubernetes
+
+> In Kubernetes, you can set up a DNS system with two well-supported add-ons: CoreDNS and Kube-DNS. CoreDNS is a newer add-on that became a default DNS server as of Kubernetes v1.12. However, Kube-DNS may still be installed as a default DNS system by certain Kubernetes installer tools.
+
+1. "Отключение" службы coredns
+
+```bash
+kubectl scale deployment --replicas 0 -n kube-system kube-dns-autoscaler
+kubectl scale deployment --replicas 0 -n kube-system coredns
+kubectl get deployment -n kube-system
+```
+
+> Результат:
+
+```output
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+coredns               0/0     0            0           6h13m
+kube-dns-autoscaler   0/0     0            0           6h13m
+metrics-server        0/1     1            0           6h13m
+```
+
+2. Проверка недоступности DNS:
+
+```bash
+kubectl exec ui-764fc4f97d-vr2pj -ti -n default -- /bin/bash
+
+root@ui-764fc4f97d-vr2pj:/app# ping post
+ping: unknown host post
+
+root@ui-764fc4f97d-vr2pj:/app# telnet post 5000
+telnet: could not resolve post/5000: Temporary failure in name resolution
+```
+
+2. Проверка с доступностью DNS:
+
+```bash
+kubectl exec ui-764fc4f97d-vr2pj -ti -n default -- telnet post 5000
+Trying 10.96.239.150...
+Connected to post.default.svc.cluster.local.
+Escape character is '^]'.
+
+kubectl scale deployment --replicas 1 -n kube-system coredns kube-dns-autoscaler
+
+kubectl exec ui-764fc4f97d-vr2pj -ti -n default -- ping -c 4 ya.ru
+PING ya.ru (77.88.55.242) 56(84) bytes of data.
+64 bytes from ya.ru (77.88.55.242): icmp_seq=1 ttl=248 time=3.58 ms
+```
+
+### Сервисы
+
+[Типы сервисов](https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types): ClusterIP, NodePort, LoadBalancer, ExternalName.
+
+**selector** — атрибут, который связывает сервис с подами. Связь происходит через совпадения лейблов. То есть в данном примере наш сервис *post* будет связан с подами, имеющими лейблы *reddit: post*.
+**ports** — атрибут, позволяющий объявить порты сервиса и связать их с портами подов. Получается, что обратившись на порт 443 сервиса metrics-server, мы попадём на порт с именем https у подов. В нашем кластере этот порт также равен 443.
+
+> Service объединяет несколько подов в пул и даёт единый сетевой доступ к этому пулу. Это решает проблему непостоянства адреса одиночных подов
+
+#### Сетевые абстракции
+
+1. NodePort
+
+Тип NodePort хоть и предоставляет доступ к сервису, но получить доступ к нашему приложению мы можем через проброс портов утилиты kubectl:
+
+```yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  labels:
+    app: reddit
+    component: ui
+spec:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  ports:
+  - port: 80
+    nodePort: 30294
+    protocol: TCP
+    targetPort: 9292
+  selector:
+    app: reddit
+    component: ui
+```
+
+> `kubectl` в отличии от docker команды позволяет воспользоваться табуляцией для выбора нужного Deployment'а контейнера
+
+```bash
+
+kubectl port-forward -n dev ui-cf9f76bc-8qwr4 8888:9292
+Forwarding from 127.0.0.1:8888 -> 9292
+Handling connection for 8888
+```
+
+![](img/Screenshot_20231022_141612.png)
+
+2. LoadBalancer
+
+```yaml
+spec:
+  type: LoadBalancer
+```
+
+> <span style="color:blue">INFO</span>
+> При создании сервиса типа LoadBalancer, контроллер Yandex Cloud создает и настраивает сетевой балансировщик нагрузки в вашем каталоге с публичным IP-адресом.
+>
+
+![Network Load Balancer](img/Screenshot_20231022_151421.png)
+
+```bash
+kubectl get services -n dev -o wide
+```
+
+> Результат:
+
+```output
+NAME         TYPE           CLUSTER-IP      EXTERNAL-IP                   PORT(S)           AGE    SELECTOR
+comment      NodePort       10.96.211.236   <none>                        9292:30263/TCP    2d3h   app=reddit,component=comment
+comment-db   ExternalName   <none>          mongo.dev.svc.cluster.local   <none>            31h    <none>
+mongo        NodePort       10.96.241.0     <none>                        27017:31944/TCP   2d3h   app=reddit,component=mongo
+post         ClusterIP      10.96.238.60    <none>                        5000/TCP          2d3h   app=reddit,component=post
+post-db      ExternalName   <none>          mongo.dev.svc.cluster.local   <none>            31h    <none>
+ui           LoadBalancer   10.96.232.43    51.250.39.254                 80:30294/TCP      11s    app=reddit,component=ui
+```
+
+```bash
+kubectl get service -n dev --selector component=ui
+```
+
+> Результат:
+```output
+NAME      TYPE           CLUSTER-IP      EXTERNAL-IP     PORT(S)          AGE
+comment   NodePort       10.96.211.236   <none>          9292:30263/TCP   2d3h
+ui        LoadBalancer   10.96.232.43    51.250.39.254   80:30294/TCP     34s
+```
+
+![](img/Screenshot_20231022_151747.png)
+
+3. Ingress и TLS Termination
+
+Ingress Сontroller — один из важнейших компонентов кластера Kubernetes. Через него проходят практически все внешние запросы к кластеру.
+Для стандартного Nginx Ingress Controller входящий трафик обрабатывается Nginx, который развёрнут внутри кластера и распределяет запросы по сервисам типа ClusterIP.
+
+Для выполнения домашнего задания были рассмотрены два Ingress Сontroller:
+- [Yandex ALB Ingress Controller](https://cloud.yandex.ru/docs/application-load-balancer/) - ALB-балансировщик
+- [Ingress NGINX Controller](https://kubernetes.github.io/ingress-nginx/)
+
+Для настройки Yandex ALB - можно воспользоваться материалом курса [Деплой инфраструктуры по модели gitops](https://practicum.yandex.ru/profile/ycloud-deploy/)
+Пример манифеста `ingress.yml` для Pod'а *httpbin*:
+
+```bash
+cat << EOF > httpbin-ingress.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: httpbin
+  annotations:
+    ingress.alb.yc.io/subnets: $(yc vpc subnet get default-ru-central1-a | head -1 | awk -F ': ' '{print $2}')
+    ingress.alb.yc.io/external-ipv4-address: $(yc vpc address get infra-alb --format json | jq -r .external_ipv4_address.address)
+    ingress.alb.yc.io/group-name: infra-alb
+    ingress.alb.yc.io/security-groups: $(yc vpc security-group get --name yc-security-group | head -1 | awk '{print $2}')
+spec:
+  tls:
+    - hosts:
+        - "httpbin.infranet.dev"
+      secretName: yc-certmgr-cert-id-$(yc certificate-manager certificate list --format json | jq -r '.[] | select(.name == "kube-infra") | .id')
+  rules:
+    - host: httpbin.infranet.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: httpbin
+                port:
+                  number: 80
+
+EOF
+
+kubectl apply -n httpbin --force=true -f manifests/ingress.yaml
+
+curl https://httpbin.infra.net.ru
+```
+
+> <span style="color:blue">INFO</span>
+> Здесь же сразу для получения сертификата *letsencrypt* заведен домен *infranet.dev*, изучен и настроен **Cloud DNS**, **Certificate Manager**.
+
+Создадим сертификат на доменное имя:
+
+```bash
+yc certificate-manager certificate request \
+  --name kube-infra \
+  --domains "*.infranet.dev" \
+  --challenge dns
+```
+
+> Результат:
+
+```output
+id: fpqglql78os3ujgdao91
+folder_id: b1g0da3u1gqk0nansi59
+created_at: "2023-10-18T15:51:36.931798407Z"
+name: kube-infra
+type: MANAGED
+domains:
+  - '*.infranet.dev'
+status: VALIDATING
+updated_at: "2023-10-18T15:51:36.931798407Z"
+```
+
+В настройках домена указываются nameservers Яндекса, чтобы и доменными записями управлять через Yandex Cloud:
+- ns1.yandexcloud.net
+- ns2.yandexcloud.net
+
+Для автоматической проверки владения доменом требуется создать специальную CNAME-запись, ведущую на certificate-manager:
+```bash
+YC_CERT_ID=$(yc certificate-manager certificate list --format json | jq -r '.[] | select(.name == "kube-infra") | .id')
+yc dns zone add-records --name yc-courses --record \
+"_acme-challenge.infranet.dev. 600 CNAME $YC_CERT_ID.cm.yandexcloud.net."
+yc certificate-manager certificate content --name kube-infra
+```
+
+Статус сертификата должен перейти в состояние ISSUED:
+
+```bash
+yc certificate-manager certificate list --format json | jq -r '.[] | select(.name == "kube-infra") | .status'
+```
+
+Создание wildcard A-записи, указывающую на IP балансировщика:
+
+```bash
+yc dns zone add-records --name yc-courses \
+--record "*.infranet.dev. 600 A $INFRA_ALB_ADDRESS"
+```
+
+> Результат:
+
+```output
++--------+-----------------+------+----------------+-----+
+| ACTION |      NAME       | TYPE |      DATA      | TTL |
++--------+-----------------+------+----------------+-----+
+| +      | *.infranet.dev. | A    | 158.160.81.102 | 600 |
++--------+-----------------+------+----------------+-----+
+```
+
+![Пример Cloud DNS](img/Screenshot_20231022_155727.png)
+
+Получить сертификат и ключ из облака
+
+```bash
+yc certificate-manager certificate content --name kube-infra
+```
+
+Или же загрузить можно свой в кластер:
+
+```bash
+kubectl create secret tls ui-ingress --key privkey.pem --cert cert.pem -n dev
+kubectl describe secret ui-ingress -n dev
+```
+
+> Результат:
+>
+```output
+Name:         ui-ingress-tls
+Namespace:    dev
+Labels:       <none>
+Annotations:  <none>
+
+Type:  kubernetes.io/tls
+
+Data
+====
+tls.crt:  1762 bytes
+tls.key:  1676 bytes
+```
+
+Ниже приводится настройка Ingress NGINX Controller'а
+
+```bash
+helm upgrade \
+--create-namespace \
+--namespace ingress-nginx \
+--set folderId=$YC_FOLDER_ID \
+--set clusterId=$YC_CLUSTER_ID \
+--install ingress-nginx ingress-nginx \
+--set-file saKeySecretKey=../../kubernetes/infra/.secrets/$YC_SVC_ACCT \
+--repo https://kubernetes.github.io/ingress-nginx \
+--atomic
+```
+
+> Результат:
+
+```outpout
+Release "ingress-nginx" does not exist. Installing it now.
+NAME: ingress-nginx
+LAST DEPLOYED: Fri Oct 20 15:56:45 2023
+NAMESPACE: ingress-nginx
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+The ingress-nginx controller has been installed.
+It may take a few minutes for the LoadBalancer IP to be available.
+You can watch the status by running 'kubectl --namespace ingress-nginx get services -o wide -w ingress-nginx-controller'
+...
+```
+
+Как результат приводится пример yaml файла, который был адаптирован для приложения *reddit* - ui-ingress.yml с **добавляем** в Ingress использование TLS-сертификата
+
+```bash
+cat << EOF > ui-ingress.yml
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ui
+  namespace: dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: reddit.infranet.dev
+      http:
+        paths:
+          - pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  number: 80
+            path: /*
+  tls:
+    - hosts:
+      - reddit.infranet.dev
+      secretName: ui-ingress-tls
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ui-ingress-tls
+  namespace: dev
+data:
+  tls.crt: $(cat certs/cert.pem | base64 -w 0)
+  tls.key: $(cat certs/key.pem | base64 -w 0)
+type: kubernetes.io/tls
+
+EOF
+
+kubectl apply -n dev -f ui-service.yml -f ui-ingress.yml
+```
+
+Применяем и ui-service.yml, так как поменялся тип на ClusterIP
+
+![Пример NLB Inginx Controller'а](img/Screenshot_20231022_161050.png)
+
+```bash
+kubectl get ingress -n dev -o wide
+```
+
+> Результат:
+
+```output
+NAME   CLASS   HOSTS                 ADDRESS          PORTS     AGE
+ui     nginx   reddit.infranet.dev   158.160.81.102   80, 443   28h
+```
+
+![Приложение на 443 порту](img/Screenshot_20231022_161313.png)
+
+### Задание со *
+
+[Secret](https://kubernetes.io/docs/concepts/services-networking/ingress/#tls)
+
+```yaml
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ui-ingress-tls
+  namespace: dev
+data:
+  tls.crt: base64 encoded cert
+  tls.key: base64 encoded key
+type: kubernetes.io/tls
+```
+
+### Network Policy
+
+```bash
+yc container clusters list
+```
+
+> Результат:
+
+![Кластер](img/Screenshot_20231022_163508.png)
+
+В самом начале рассматривались группы безопасности, которые можно применить к самому кластеру `managed-kubernetes cluster` и `managed-kubernetes node-group`.
+Пример настройки в web-консоли:
+
+![Группы безопасности кластера](img/Screenshot_20231022_164150.png)
+![Группы безопасности группы узлов](img/Screenshot_20231022_164434.png)
+
+> <span style="color:red">INFO</span>Можно включить использование сетевых политик только при создании кластера.
+>
+Чтобы включить контроллер сетевых политик Calico, передайте в команде создания кластера Managed Service for Kubernetes параметр --enable-network-policy:
+
+```bash
+yc managed-kubernetes cluster create \
+...
+  --enable-network-policy
+```
+
+1. Применён файл *mongo-network-policy.yml*
+
+```bash
+kubectl get networkpolicies.networking.k8s.io -n dev
+```
+
+> Результат:
+
+```output
+NAME              POD-SELECTOR                 AGE
+deny-db-traffic   app=reddit,component=mongo   25m
+```
+
+2. Для проверки использовался pod *ui*
+
+```bash
+kubectl exec -ti -n dev ui-cf9f76bc-8qwr4 -- telnet mongo 27017
+```
+```output
+Trying 10.96.241.0...
+^C
+```
+
+3. Для обеспечения доступности:
+
+```yaml
+    - podSelector:
+        matchLabels:
+          app: reddit
+          component: post
+    - podSelector:
+        matchLabels:
+          app: reddit
+          component: ui
+    ports:
+      - protocol: TCP
+        port: 27017
+```
+
+> Результат:
+
+```output
+Trying 10.96.241.0...
+Connected to mongo.dev.svc.cluster.local.
+Escape character is '^]'.
+^]
+```
+
+### Хранилище для базы
+
+1. тип Volume emptyDir
+
+```yaml
+  volumeMounts:
+    - name: mongo-persistent-storage
+      mountPath: /data/db
+volumes:
+  - name: mongo-ps
+    emptyDir: {}
+```
+
+Сообщения удаляются при перезагрузке или удалении pod'а с ДБ
+
+2. Динамическая подготовка тома
+
+В большинстве случаев нет необходимости вручную создавать объекты PersistentVolumes и диски Compute Cloud. Вместо этого можно создать объекты PersistentVolumeClaim, и Managed Service for Kubernetes автоматически подготовит необходимый объект PersistentVolume и создаст диск.
+
+> При удалении PVC и ReclaimPolicy Delete `kubectl get storageclass` диски удаляются
+
+```yaml
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+  labels:
+    app: reddit
+    component: pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: yc-network-hdd
+```
+
+3. Статический том
+
+При использовании статического диска, необходимо к PVC добавить атрибут **volumeName** с названием PV.
+PVC
+
+```bash
+cat << EOF > mongo-pv.yml
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  csi:
+    driver: disk-csi-driver.mks.ycloud.io
+    fsType: ext4
+    volumeHandle: $(yc compute disk show --name mongo-disk --format json | jq .id | tr -d '"')
+  storageClassName: yc-network-hdd
+
+EOF
+```
+
+```bash
+cat << EOF >> mongo-pvc.yml
+  volumeName: mongo-pv
+EOF
+```
+
+```bash
+kubectl create -n dev -f mongo-pvc.yml
+kubectl describe -n dev persistentvolumeclaim mongo-pvc
+kubectl describe -n dev persistentvolume mongo-pv
+```
+
+> Результат:
+
+```output
+Name:          mongo-pvc
+Namespace:     dev
+StorageClass:  yc-network-hdd
+Status:        Bound
+Volume:        mongo-pv
+Labels:        app=reddit
+               component=pvc
+Annotations:   pv.kubernetes.io/bind-completed: yes
+Finalizers:    [kubernetes.io/pvc-protection]
+Capacity:      2Gi
+Access Modes:  RWO
+VolumeMode:    Filesystem
+Used By:       mongo-6568865f78-drqvs
+Events:        <none>
+```
+
+```bash
+kubectl describe -n dev persistentvolume mongo-pv
+```
+
+> Результат:
+
+```output
+Name:            mongo-pv
+Labels:          <none>
+Annotations:     pv.kubernetes.io/bound-by-controller: yes
+Finalizers:      [kubernetes.io/pv-protection external-attacher/disk-csi-driver-mks-ycloud-io]
+StorageClass:    yc-network-hdd
+Status:          Bound
+Claim:           dev/mongo-pvc
+Reclaim Policy:  Retain
+Access Modes:    RWO
+VolumeMode:      Filesystem
+Capacity:        2Gi
+Node Affinity:   <none>
+Message:
+Source:
+    Type:              CSI (a Container Storage Interface (CSI) volume source)
+    Driver:            disk-csi-driver.mks.ycloud.io
+    FSType:            ext4
+    VolumeHandle:      fhmq2jmvqv725chbkker
+    ReadOnly:          false
+    VolumeAttributes:  <none>
+Events:                <none>
+```
+
+Важно, чтобы Status перешел из *Pending* в **Bound**
+
+4. Тестирование
+
+Удаляем диск и создаем новый, после создаем новый, прописываем в PV id диска *volumeHandle*
+
+```bash
+yc compute disk delete --name mongo-disk; \
+yc compute disk create --name mongo-disk --size 2 --description "Disk for K8s"; \
+cat << EOF > mongo-pv.yml
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  csi:
+    driver: disk-csi-driver.mks.ycloud.io
+    fsType: ext4
+    volumeHandle: $(yc compute disk show --name mongo-disk --format json | jq .id | tr -d '"')
+  storageClassName: yc-network-hdd
+
+EOF
+kubectl apply -n dev -f mongo-pv.yml -f mongo-pvc.yml -f mongo-deployment.yml
+
+kubectl describe -n dev pod mongo
+```
+
+> Результат:
+
+![Статус PV](img/Screenshot_20231021_235609.png)
+
+![Статус PVC](img/Screenshot_20231021_235559.png)
+
+После удаления и создания mongo Deployment все сообщения сохранены:
+
+![Добавление сообщения](img/Screenshot_20231022_175116.png)
+
+```bash
+kubectl delete -n dev -f mongo-deployment.yml
+
+kubectl apply -n dev -f mongo-deployment.yml
+```
+
+![Статус mongo](img/Screenshot_20231022_175511.png)
+
+> Реузльтат:
+
+![Сообщения сохранились](img/Screenshot_20231022_175300.png)
+
+На картинках ниже будет видно статус использования диска
+
+![Утилизация диска](img/Screenshot_20231022_000054.png)
+
+### kubectl cheatsheet
+
+Полезные команды kubectl, которые могут пригодиться при работы с кластером:
+
+- `kubectl apply -f` — применить манифесты
+- `kubectl get <kind>` — получить список объектов <kind>
+- `kubectl get <kind> <name> -o wide` — выдает больше информации, в зависимости от kind
+- `kubectl get <kind> <name> -o yaml` — в виде yaml
+- `kubectl describe <kind> <name>` — текстовое описание + события
+- `kubectl edit` — редактирование прямо в терминале любого ресурса
+- `kubectl logs <pod_name>` — посмотреть логи пода
+- `kubectl port-forward` — пробросить порт из Kubernetes на локальный хост
+- `kubectl exec` — выполнить команду внутри запущенного контейнера
+
 
 ## <a name="hw27">Введение в kubernetes</a>
 
