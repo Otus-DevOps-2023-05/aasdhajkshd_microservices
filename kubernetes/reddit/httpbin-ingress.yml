@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: httpbin
+  annotations:
+    ingress.alb.yc.io/subnets: e9bi9oji8ljojstbt6cp
+    ingress.alb.yc.io/external-ipv4-address: 158.160.56.108
+    ingress.alb.yc.io/group-name: infra-alb
+    ingress.alb.yc.io/security-groups: enpkm9pmi6dp1cp3arja
+spec:
+  tls:
+    - hosts:
+        - "httpbin.infranet.dev"
+      secretName: yc-certmgr-cert-id-fpqglql78os3ujgdao91
+  rules:
+    - host: httpbin.infranet.dev
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: httpbin
+                port:
+                  number: 80
