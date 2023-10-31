@@ -41,7 +41,7 @@ aasdhajkshd microservices repository
 - [Установка GitLab Runner](https://cloud.yandex.com/en/docs/managed-kubernetes/operations/applications/gitlab-runner)
 - [Running privileged containers for the runners](https://docs.gitlab.com/runner/install/kubernetes.html#running-privileged-containers-for-the-runners)
 - [skopeo](https://github.com/containers/skopeo)
-- [docker buildx imagetools create](https://docs.docker.com/engine/reference/commandline/buildx_imagetools_create/
+- [docker buildx imagetools create](https://docs.docker.com/engine/reference/commandline/buildx_imagetools_create/)
 - [What kubernetes permissions does GitLab runner kubernetes executor need?](https://stackoverflow.com/questions/60834960/what-kubernetes-permissions-does-gitlab-runner-kubernetes-executor-need)
 - [Use tags to control which jobs a runner can run](https://docs.gitlab.com/16.5/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run)
 - [Непрерывное развертывание контейнеризованных приложений с помощью GitLab](https://cloud.yandex.ru/docs/managed-kubernetes/tutorials/gitlab-containers)
@@ -78,7 +78,7 @@ kubectl config use-context yc-kube-infra
 
 > <span style="color:red">WARNING</span>
 > Ниже нет необходимости выполнять установку tiller, так как **helm 3 is tiller less**. Tiller окончательно и безвозвратно удален. Helm 3 использует Kubernetes API напрямую.
-> Но если версия 2-я, то можно и доустановить, ссылка выше.
+> Но если версия 2-я, то можно и доустановить, ссылка выше в списке статей. Ниже из методички.
 
 ```bash
 kubectl apply -f - << EOF > tiller.yml
@@ -138,7 +138,7 @@ EOF
 
 ![Структура](img/Screenshot_20231024_232101.png)
 
-Файлы deployment.yaml, service.yaml фактически не различаются и клонировать становится проще.
+Файлы deployment.yaml, service.yaml фактически не различаются и клонировать становится их проще. Далее в CI/CD нужно удалить namespace из yaml файлов. Здесь используются как переменные для изучения.
 
 ```bash
 helm lint ui/ comment/ ui/
@@ -223,12 +223,10 @@ helm search hub mongo
 > https://artifacthub.io/packages/helm/bitnami/mongodb или
 > https://artifacthub.io/packages/helm/microfunctions/mongodb
 
-В учебной документции перадгается установить https://kubernetes-charts.storage.googleapis.com верию 0.4.18
+В учебной документации предлагается установить https://kubernetes-charts.storage.googleapis.com верию 0.4.18.
 
-
-
-Если поиск в repo, то нужно добавить репозиторий [charts](https://charts.helm.sh/stable/)
-Здесь предлагаются актуальные версии, но для приложения reddit необходима старая версия - 4.2.4
+Если же поиск выполнять в `helm search repo`, то нужно добавить репозиторий [charts](https://charts.helm.sh/stable/)
+Здесь предлагаются актуальные версии, но для приложения reddit подходит или необходима старая версия - 4.2.4.
 
 ```bash
 helm repo list
@@ -240,9 +238,11 @@ helm search repo stable/mongodb
 > Результат:
 
 ```output
-stable/mongodb                          7.8.10          4.2.4           DEPRECATED NoSQL document-oriented database tha...
+stable/mongodb 7.8.10 4.2.4 DEPRECATED NoSQL document-oriented database tha...
 ...
 ```
+
+В конфигурационном файле указываем версию:
 
 ```bash
 cat << EOF >> reddit/requirements.yaml
@@ -275,8 +275,11 @@ mongodb/values-production.yaml
 mongodb/values.schema.json
 ```
 
-В некоторых атрибутах нельзя использовать переменные в *app*...
+В некоторых атрибутах нельзя использовать переменные, как например, а *app*... оставляем аьрибуты без использования переменных.
+
+```output
 Error: INSTALLATION FAILED: YAML parse error on reddit/charts/comment/templates/deployment.yml: error converting YAML to JSON: yaml: line 22: mapping values are not allowed in this context
+```
 
 Чтобы включить 443 порт, к *ingress.yaml* можно добавить через переменные такие услования:
 
@@ -301,7 +304,7 @@ type: kubernetes.io/tls
 {{- end }}
 ```
 
-В переменных *values.yaml*:
+А в файле переменных *values.yaml* описываем их так:
 
 ```yaml
 ...
@@ -330,7 +333,7 @@ helm dep update reddit && \
 helm install reddit --namespace=dev --debug --name-template reddit-test
 ```
 
-> Результат, если успешно собрался:
+> Результат, если выполнилась успешно сборка:
 
 ```yaml
 client.go:134: [debug] creating 12 resource(s)
@@ -376,7 +379,7 @@ spec:
       secretName: ui-ingress-tls
 ```
 
-А для добавления дополнительных имен можно использовать *repository:alias* или externalNames в шаблоне `reddit/templates/externalnames.yaml``:
+Для добавления дополнительных имен (как обращение по FQDN или другим именам) можно использовать *repository:alias* или externalNames в шаблоне `reddit/templates/externalnames.yaml`:
 
 ```yaml
 {{- $values := .Values -}}
@@ -395,7 +398,7 @@ spec:
 {{- end}}
 ```
 
-В переменные добавить:
+А в файле переменных:
 
 ```yaml
 ---
@@ -411,7 +414,7 @@ post:
     externalPort: 5000
 ```
 
-> Результат `helm install reddit/ -n dev --atomic --replace --debug --name-template reddit-test --set auth.enabled=false`:
+> Результат команды: `helm install reddit/ -n dev --atomic --replace --debug --name-template reddit-test --set auth.enabled=false`:
 
 ```bash
 kubectl get service -A --selector=app=reddit
@@ -424,7 +427,7 @@ default     comment-db            ExternalName   <none>          mongo.dev.svc.c
 default     post-db               ExternalName   <none>          mongo.dev.svc.cluster.local   <none>           104s
 ```
 
-Добавлены переменные для указания называний временных узлов в файл *ui/templates/deployment.yaml*:
+И видно, что добавлены переменные для указания называний узлов в файл *ui/templates/deployment.yaml*:
 
 ```yaml
 spec:
@@ -444,7 +447,7 @@ spec:
               fieldPath: metadata.namespace
 ```
 
-без указания значений в *ui/values.yaml*:
+По заданию без указания значений добавляются переменные в *ui/values.yaml*:
 
 ```yaml
 ...
@@ -507,6 +510,8 @@ We have built a set of fully cloud native charts in [gitlab/gitlab](https://gitl
 
 [Установка Gitlab](https://docs.gitlab.com/charts/quickstart/)
 
+> Пробуем на актуальных версиях ПО...
+
 ```bash
 helm install gitlab gitlab/gitlab \
   --set global.hosts.domain=infranet.dev \
@@ -525,7 +530,9 @@ NOTES:
     - Ingress objects must be in group/version `networking.k8s.io/v1`.
 
 ```
-Получим внешний IP адрес
+
+Получим внешний IP адрес:
+
 ```bash
 
 kubectl get ingress -lrelease=gitlab
@@ -566,7 +573,9 @@ kubectl exec <Webservice pod name> -it -- bash
 
 ![Reddit Deploy](img/Screenshot_20231026_172236.png)
 
-Запуск проекта
+Инициализация проекта в репозиторий Gitlab:
+
+> Отмечю, что предлагается использовать не master, а main как репозиторий по-умолчанию...
 
 ```bash
 cd Gitlab_ci/ui
@@ -583,7 +592,8 @@ git push -uf origin main
 
 Настройка Gitlab Runner'а для запуска Docker-in-Docker (dind).
 
-Загрузка Chart'а gitlab-runner с сайта
+Загрузка Chart'а gitlab-runner с сайта:
+
 ```bash
 export HELM_EXPERIMENTAL_OCI=1 && \
 helm pull oci://cr.yandex/yc-marketplace/yandex-cloud/gitlab-org/gitlab-runner/chart/gitlab-runner  \
@@ -646,7 +656,7 @@ securityContext:
 ...
 ```
 
-Установка helm'ом Gitlab Runner (не забываем создать в проекте Gitlab - Runner, а Shared можно отключить)
+Установка helm'ом Gitlab Runner'а (не забываем создать в проекте Gitlab - Runner, а Shared можно отключить, так как нет поддержки dind)
 
 ![Gitlab Runner](img/Screenshot_20231029_170717.png)
 
@@ -725,22 +735,23 @@ docker buildx imagetools create "$CI_APPLICATION_REPOSITORY:$CI_APPLICATION_TAG"
 
 > Результат:
 
-![Pipeline release](Screenshot_20231029_170607.png)
-
 ![23f03013e37f/post:0.0.2](img/Screenshot_20231029_171848.png)
 
 Для заруска задачи (Job) в отдельном Kubernetes POD-е доавлены атрибуты *tags* в CI/CD Runner и в `.gitlab-ci.yml`
 
-[Пайплайн здорового человека](src/ui/.gitlab-ci.yml)
+[Пайплайн здорового человека](src/ui/.gitlab-ci.yml) можно посмотреть здесь, рабочий вариант... кстати!
 
-Чтобы запустить CI/CD в Environment: staging, production нужно поключить кластер Kubernetes к Gitlab, Настройте аутентификацию Kubernetes в GitLab
+Чтобы запустить CI/CD в Environment: staging, production нужно подключить кластер Kubernetes к Gitlab,
 
-По документации нужно зсздать подключение к кластеру, прямо в строке поиска агента указываем имя и создать:
+Поэтому выполнить настройку аутентификацию Kubernetes в GitLab необходимо.
+
+По документации нужно создать подключение к кластеру, прямо в строке поиска агента указываем имя и создать:
 
 ![Operate/Kubernetes clusters](img/Screenshot_20231030_163800.png)
+
 ![Operate/Kubernetes clusters](img/Screenshot_20231030_175352.png)
 
-Установка Gitlab Agent с помощью Helm-чарта (версия должна быть совместима с Gitlab):
+Установка Gitlab Agent с помощью Helm-чарта (версия должна быть совместима с Gitlab, можно взять с картинки):
 
 ```bash
 export HELM_EXPERIMENTAL_OCI=1 && \
@@ -758,7 +769,7 @@ helm upgrade --install \
   gitlab-agent ./gitlab-agent/
 ```
 
-Если RBAC указывается true, то, возможно нужно добавить роль:
+Если RBAC указывается true, то, возможно, нужно добавить роль (ранее нужно было такое же делать для Runner'а):
 
 ```bash
 cat <<EOF | kubectl create -f -
@@ -799,7 +810,7 @@ deploy_review:
 [](https://docs.gitlab.com/16.5/ee/ci/variables/predefined_variables.html)
 [Types of environments](https://docs.gitlab.com/16.5/ee/ci/environments/index.html#types-of-environments)
 
-Чтобы заработала связка Gitlab и Kubernetes, нужно воспользоваться этой статьей, в Envrironment добавил KUBE_CONFIG из *~/.kube/config* и при выполнении docker'ом в CI Pipeline'е можно было увидеть context, который был выставлен:
+Чтобы заработала связка Gitlab и Kubernetes, полезно воспользоваться этой [статьей](https://docs.gitlab.com/ee/user/clusters/agent/ci_cd_workflow.html), в Envrironment добавил KUBE_CONFIG из *~/.kube/config* и при выполнении docker'ом в CI Pipeline'е можно было увидеть context, который был выставлен:
 
 ![Kubernetes Context Agent](img/Screenshot_20231031_080044.png)
 
@@ -807,10 +818,10 @@ deploy_review:
 
 > manager.go:107: warning: a valid Helm v3 hash was not found. Checking against Helm v2 hash...
 > Error: the lock file (requirements.lock) is out of sync with the dependencies file (requirements.yaml). Please update the dependencies
+>
+Возможно, нужно не публиковать requirements.lock в *.gitignore* и еще актуальная версия helm'а, если использовать просто image: alpine - [3.13.1](https://get.helm.sh/helm-v3.13.1-linux-amd64.tar.gz)
 
-Можно использовать для установки актуальную версия [3.13.1](https://get.helm.sh/helm-v3.13.1-linux-amd64.tar.gz)
-
-Но лучше способ - это использовать уже **alpine/helm** образ:
+Но переделал способ - это использовать уже **alpine/helm** образ (взято из лекционного материала):
 
 ```yaml
 test:
@@ -829,9 +840,10 @@ test:
   only:
     - branches
 ```
-Опытном путём выяснилось, что всё же не нужен KUBE_CONFIG/KUBECONFIG - yaml-файл, KUBECONFIG - файл, будет по пути из преременной `KUBECONFIG=/builds/23f03013e37f/reddit-deploy.tmp/KUBECONFIG`
 
-Сложно была [разобраться](https://docs.gitlab.com/ee/user/clusters/agent/ci_cd_workflow.html#update-your-gitlab-ciyml-file-to-run-kubectl-commands), какой-же всё же контекст:
+Опытном путём выяснилось, что всё же не нужен KUBE_CONFIG/KUBECONFIG - yaml-файл указывать в переменных в Gitlab-Project-Settings-CI/CD-Variables, KUBECONFIG - файл, будет виден в `set` из преременной `KUBECONFIG=/builds/23f03013e37f/reddit-deploy.tmp/KUBECONFIG`
+
+Сложно было [разобраться](https://docs.gitlab.com/ee/user/clusters/agent/ci_cd_workflow.html#update-your-gitlab-ciyml-file-to-run-kubectl-commands), какой-же всё же контекст:
 <gitlab-group>/<project-name>:<agent-folder-name>, где *agent-folder-name*, берется из .gitlab/agents/<agent-folder-name>/config.yaml
 
 ```yaml
@@ -851,9 +863,9 @@ observability:
 
 ```
 
-В *gitlab-ci.yml* в ui.image.tag подправлен путь в команде helm'а - '/-/'
+В *gitlab-ci.yml* в ui.image.tag подправлен путь в команде helm'а - добавлен '/-/' в `/ui/-/raw/main/VERSION`
 
-Задать своего агента можно и через переменную:
+Далее задать своего агента можно и через переменную:
 
 ![Kube Context Variable](img/Screenshot_20231031_125718.png)
 
