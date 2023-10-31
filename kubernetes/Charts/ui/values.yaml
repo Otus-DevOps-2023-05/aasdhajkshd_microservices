@@ -1,0 +1,27 @@
+---
+service:
+  internalPort: 9292
+  externalPort: 9292
+  nodePort: 30295
+image:
+  repository: 23f03013e37f/ui
+  tag: latest
+ingress:
+  enabled: true
+  secretName: ui-ingress-tls
+  hosts:
+  - host: reddit.infranet.dev
+    paths:
+    - path: /
+      backend:
+        service:
+          name: ui
+  tls:
+  - hosts:
+    - reddit.infranet.dev
+namespace: dev
+replicaCount: 1
+postHost:
+commentHost:
+postPort: 5000
+commentPort: 9292

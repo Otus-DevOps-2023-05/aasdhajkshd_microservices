@@ -1,0 +1,157 @@
+image: alpine/helm:latest
+
+stages:
+  - test
+  - staging
+  - production
+
+test:
+  stage: test
+  image:
+    name: alpine/helm
+    entrypoint: ["/bin/sh","-c"]
+  variables:
+    KUBE_CONTEXT: 23f03013e37f/reddit-deploy:reddit-deploy
+    KUBE_NAMESPACE: test
+  environment: test
+  script:
+    - install_dependencies
+    - ensure_namespace
+    - delete
+    - deploy
+  only:
+    - branches
+  except:
+    - triggers
+
+staging:
+  stage: staging
+  variables:
+    KUBE_CONTEXT: 23f03013e37f/reddit-deploy:reddit-deploy
+    KUBE_NAMESPACE: staging
+  environment:
+    name: staging
+    url: https://staging.infranet.dev
+  script:
+  - install_dependencies
+  - ensure_namespace
+  - deploy
+  only:
+    refs:
+      - main
+  except:
+    - triggers
+
+production:
+  stage: production
+  script:
+    - install_dependencies
+    - ensure_namespace
+    - deploy
+  variables:
+    KUBE_CONTEXT: ${KUBE_CONTEXT_PROD}
+    KUBE_NAMESPACE: production
+  environment:
+    name: production
+    url: https://production.infranet.dev
+  when: manual
+  only:
+    refs:
+      - main
+  except:
+    - triggers
+
+production_trigers:
+  stage: production
+  variables:
+    KUBE_CONTEXT_PROD: ${KUBE_CONTEXT_PROD}
+    KUBE_NAMESPACE: production
+    host: $CI_PROJECT_PATH_SLUG-$CI_COMMIT_REF_SLUG
+    name: $CI_ENVIRONMENT_SLUG
+  environment:
+    name: production
+    url: https://production.infranet.dev
+  script:
+    - install_dependencies
+    - ensure_namespace
+    - deploy
+  only:
+    refs:
+      - triggers
+
+.auto_devops: &auto_devops |
+  # Auto DevOps variables and functions
+  [[ "$TRACE" ]] && set -x
+  export CI_REGISTRY="index.docker.io"
+  export CI_APPLICATION_REPOSITORY=$CI_REGISTRY/$CI_PROJECT_PATH
+  export CI_APPLICATION_TAG=$CI_COMMIT_REF_SLUG
+  export CI_CONTAINER_NAME=ci_job_build_${CI_JOB_ID}
+  export TILLER_NAMESPACE="kube-system"
+
+  function deploy() {
+
+    track="${1-stable}"
+    name="$CI_ENVIRONMENT_SLUG"
+    echo -e "\nStarting deployment of the project $name..."
+    tree ./
+
+    echo "helm dep build --debug reddit/"
+    helm dep build --debug reddit/ || true
+
+    helm dep ls reddit/
+
+    helm template \
+      --set ui.ingress.host="$host" \
+      --set ui.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/ui/-/raw/main/VERSION)" \
+      --set post.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/post/-/raw/main/VERSION)" \
+      --set comment.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/comment/-/raw/main/VERSION)" \
+      --set auth.enabled=false \
+      --namespace="$KUBE_NAMESPACE" --create-namespace \
+      --version="$CI_PIPELINE_ID-$CI_JOB_ID" \
+      "$name" \
+      reddit/
+
+    helm upgrade --install --atomic --debug --wait --cleanup-on-fail \
+      --set ui.ingress.host="$host" \
+      --set ui.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/ui/-/raw/main/VERSION)" \
+      --set post.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/post/-/raw/main/VERSION)" \
+      --set comment.image.tag="$(curl -k https://gitlab.infranet.dev/$CI_PROJECT_NAMESPACE/comment/-/raw/main/VERSION)" \
+      --set auth.enabled=false \
+      --namespace="$KUBE_NAMESPACE" --create-namespace \
+      --version="$CI_PIPELINE_ID-$CI_JOB_ID" \
+      "$name" \
+      reddit/
+
+  }
+
+  function install_dependencies() {
+    echo -e "\nInstalling default depecdencies and setting kube context..."
+    apk add -U openssl curl tar gzip bash ca-certificates git gpg tree
+    wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub
+    curl -L -o /usr/bin/kubectl https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+    chmod +x /usr/bin/kubectl
+    kubectl version --client
+    chmod go-rw ${KUBECONFIG}
+    kubectl config get-contexts
+    kubectl config use-context $KUBE_CONTEXT
+    helm version --client
+    helm repo add gitlab https://charts.gitlab.io
+    helm repo add stable https://charts.helm.sh/stable
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+    helm repo update
+
+  }
+
+  function ensure_namespace() {
+    kubectl describe namespace "$KUBE_NAMESPACE" || kubectl create namespace "$KUBE_NAMESPACE"
+  }
+
+  function delete() {
+    track="${1-stable}"
+    name="$CI_ENVIRONMENT_SLUG"
+    echo -e "\nDeleting helm project $name..."
+    helm delete "$name" || true
+  }
+
+before_script:
+  - *auto_devops

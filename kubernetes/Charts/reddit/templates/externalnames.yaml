@@ -1,0 +1,14 @@
+{{- $values := .Values -}}
+{{- $release := .Release -}}
+{{- range $key, $value := .Values.service.names }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $value }}
+  labels:
+    app: reddit
+spec:
+  type: "ExternalName"
+  externalName: {{ printf "%s-mongodb.dev.svc.cluster.local" $release.Name }}
+{{- end}}
