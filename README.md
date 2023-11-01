@@ -739,7 +739,7 @@ docker buildx imagetools create "$CI_APPLICATION_REPOSITORY:$CI_APPLICATION_TAG"
 
 Для заруска задачи (Job) в отдельном Kubernetes POD-е доавлены атрибуты *tags* в CI/CD Runner и в `.gitlab-ci.yml`
 
-[Пайплайн здорового человека](src/ui/.gitlab-ci.yml) можно посмотреть здесь, рабочий вариант... кстати!
+[Пайплайн здорового человека](src/ui/.gitlab-ci.yml) для *ui* можно посмотреть здесь, рабочий вариант... для [reddit-deploy](kubernetes/Charts/.gitlab-ci.yml).
 
 Чтобы запустить CI/CD в Environment: staging, production нужно подключить кластер Kubernetes к Gitlab,
 
