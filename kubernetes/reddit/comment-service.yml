@@ -5,9 +5,8 @@ metadata:
   name: comment
   labels:
     app: reddit
-    component: ui
+    component: comment
 spec:
-  type: NodePort
   ports:
   - port: 9292
     protocol: TCP
