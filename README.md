@@ -280,7 +280,7 @@ ui-57f876ddf5-z2mlm   1/1     Running   0          111s   10.244.0.249   minikub
 
 2. dashboard для kubernetes доступен скачивания на основном сайте [Kubernetes Dashboard](https://github.com/kubernetes/dashboard/tree/master)
 
-в папке kubernetes/infra/dashboard манифесты для создания и скрипт запуска или остановки [dashboard](https://upcloud.com/resources/tutorials/deploy-kubernetes-dashboard) и [Deploying the Dashboard UI](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/)
+в папке kubernetes/infra/dashboard манифесты для создания и скрипт запуска или остановки [dashboard](https://upcloud.com/resources/tutorials/deploy-kubernetes-dashboard) и [Deploying the Dashboard UI](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/), актуальный файл `kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml`
 
 Самой простой способ - это установка из helm'ом [Installing the Chart](https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard)
 
