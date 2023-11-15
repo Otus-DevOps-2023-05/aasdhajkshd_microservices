@@ -34,9 +34,8 @@ spec:
             memory: 512Mi
             cpu: 1
         volumeMounts:
-        - name: mongo-gce-pd-storage
+        - name: mongo-persistent-storage
           mountPath: /data/db
       volumes:
-      - name: mongo-gce-pd-storage
-        persistentVolumeClaim:
-          claimName: mongo-pvc
+      - name: mongo-persistent-storage
+        emptyDir: {}
