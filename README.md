@@ -18,6 +18,327 @@ aasdhajkshd microservices repository
 * [kubernetes-1 Введение в kubernetes](#hw27)
 * [kubernetes-3 Kubernetes. Networks, Storages](#hw30)
 * [kubernetes-4 CI/CD в Kubernetes](#hw31)
+* [kubernetes-2 Kubernetes. Запуск кластера и приложения. Модель безопасности](#hw29)
+
+## <a name="hw29">Запуск кластера и приложения. Модель безопасности</a>
+
+Список литературы и статей:
+
+- [Менеджер пакетов для Kubernetes](https://kubernetes.io/docs/tasks/tools/)
+- [Установка minikube](https://minikube.sigs.k8s.io/docs/start/)
+- [yq: Command-line YAML/XML/TOML processor - jq wrapper for YAML, XML, TOML documents](https://github.com/kislyuk/yq)
+- [Creating sample user](https://github.com/kubernetes/dashboard/blob/master/docs/user/access-control/creating-sample-user.md)
+
+#### Выполненные работы
+
+---
+
+### Minikube
+
+1. Установка выполнена `sudo pacman -S minikube`
+
+> Результат:
+
+```output
+minikube version: v1.31.2
+commit: fd7ecd9c4599bef9f04c0986c4a0187f98a4396e-dirty
+```
+
+Так как уже есть существующий кластер на актуальной версии v1.27.4, предлагается поднять еще один кластер командой `minikube start -p minikube2 --kubernetes-version=v1.19.7`.
+
+> Результат:
+
+```output
+😄  [minikube2] minikube v1.31.2 on Arch "rolling"
+🎉  minikube 1.32.0 is available! Download it: https://github.com/kubernetes/minikube/releases/tag/v1.32.0
+💡  To disable this notice, run: 'minikube config set WantUpdateNotification false'
+
+✨  Automatically selected the docker driver. Other choices: virtualbox, none, ssh
+📌  Using Docker driver with root privileges
+👍  Starting control plane node minikube2 in cluster minikube2
+🚜  Pulling base image ...
+💾  Downloading Kubernetes v1.19.7 preload ...
+    > preloaded-images-k8s-v18-v1...:  379.21 MiB / 379.21 MiB  100.00% 21.39 M
+🔥  Creating docker container (CPUs=2, Memory=4096MB) ...
+🐳  Preparing Kubernetes v1.19.7 on Docker 24.0.4 ...
+❌  Unable to load cached images: loading cached images: stat /home/elnone/.minikube/cache/images/amd64/registry.k8s.io/etcd_3.4.13-0: no such file or directory
+    ▪ Generating certificates and keys ...
+    ▪ Booting up control plane ...
+    ▪ Configuring RBAC rules ...
+    ▪ Using image gcr.io/k8s-minikube/storage-provisioner:v5
+🔎  Verifying Kubernetes components...
+🌟  Enabled addons: storage-provisioner, default-storageclass
+
+❗  /usr/bin/kubectl is version 1.28.2, which may have incompatibilities with Kubernetes 1.19.7.
+    ▪ Want kubectl v1.19.7? Try 'minikube kubectl -- get pods -A'
+🏄  Done! kubectl is now configured to use "minikube2" cluster and "default" namespace by default
+```
+
+Выполним команду `kubectl get nodes`
+
+> Результат:
+
+```output
+NAME        STATUS   ROLES    AGE     VERSION
+minikube2   Ready    master   2m17s   v1.19.7
+```
+
+Информацию о контекстах kubectl в файле ~/.kube/config `cat ~/.kube/config | head -n 12`
+
+> Результат:
+
+```output
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority: /home/elnone/.minikube/ca.crt
+    extensions:
+    - extension:
+        last-update: Wed, 15 Nov 2023 01:04:25 MSK
+        provider: minikube.sigs.k8s.io
+        version: v1.31.2
+      name: cluster_info
+    server: https://192.168.58.2:8443
+  name: minikube2
+```
+
+```bash
+kubectl apply -f ui-deployment.yml
+kubectl get deployment
+```
+
+> Результат:
+
+```output
+NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+ui     3/3     3            3           61s
+```
+
+```bash
+kubectl get pods --selector component=ui
+```
+
+> Результат:
+
+```output
+NAME                READY   STATUS    RESTARTS   AGE
+ui-cf9f76bc-2pblk   1/1     Running   0          2m14s
+ui-cf9f76bc-78dgh   1/1     Running   0          2m14s
+ui-cf9f76bc-vcxk2   1/1     Running   0          2m14s
+```
+
+```bash
+kubectl port-forward ui-cf9f76bc-78dgh 8080:9292
+```
+
+```bash
+kubectl describe service comment | grep Endpoints
+```
+
+> Результат:
+
+```output
+Endpoints:                10.244.0.248:9292
+```
+
+```bash
+kubectl exec -ti comment-5678bb9fd5-lnjjh nslookup comment
+```
+
+> Результат:
+
+```output
+nslookup: can't resolve '(null)': Name does not resolve
+
+Name:      comment
+Address 1: 10.111.209.21 comment.default.svc.cluster.local
+```
+
+```bash
+kubectl apply -f post-service.yml -f ui-service.yml
+kubectl port-forward ui-cf9f76bc-2pblk 9292:9292
+
+```
+> Результат:
+
+```output
+```
+
+```bash
+kubectl get svc -n default
+```
+
+> Результат:
+
+```output
+NAME         TYPE           CLUSTER-IP       EXTERNAL-IP                   PORT(S)           AGE
+comment      NodePort       10.111.209.21    <none>                        9292:30634/TCP    10m
+comment-db   ExternalName   <none>           mongo.dev.svc.cluster.local   <none>            10m
+kubernetes   ClusterIP      10.96.0.1        <none>                        443/TCP           11d
+mongo        NodePort       10.101.112.128   <none>                        27017:32434/TCP   10m
+post         ClusterIP      10.101.181.98    <none>                        5000/TCP          10m
+post-db      ExternalName   <none>           mongo.dev.svc.cluster.local   <none>            10m
+ui           NodePort       10.103.216.210   <none>                        80:30294/TCP      3s
+```
+
+```bash
+minikube service list
+```
+
+> Результат:
+
+```output
+|----------------------|---------------------------|--------------|---------------------------|
+|      NAMESPACE       |           NAME            | TARGET PORT  |            URL            |
+|----------------------|---------------------------|--------------|---------------------------|
+| default              | comment                   |         9292 | http://192.168.49.2:30634 |
+| default              | comment-db                | No node port |                           |
+| default              | kubernetes                | No node port |                           |
+| default              | mongo                     |        27017 | http://192.168.49.2:32434 |
+| default              | post                      | No node port |                           |
+| default              | post-db                   | No node port |                           |
+| default              | ui                        |           80 | http://192.168.49.2:30294 |
+| kube-system          | kube-dns                  | No node port |                           |
+| kube-system          | metrics-server            | No node port |                           |
+| kubernetes-dashboard | dashboard-metrics-scraper | No node port |                           |
+| kubernetes-dashboard | kubernetes-dashboard      | No node port |                           |
+|----------------------|---------------------------|--------------|---------------------------|
+```
+
+```bash
+minikube addons list
+```
+
+> Результат:
+
+```output
+|-----------------------------|----------|--------------|--------------------------------|
+|         ADDON NAME          | PROFILE  |    STATUS    |           MAINTAINER           |
+|-----------------------------|----------|--------------|--------------------------------|
+| ambassador                  | minikube | disabled     | 3rd party (Ambassador)         |
+| auto-pause                  | minikube | disabled     | minikube                       |
+| cloud-spanner               | minikube | disabled     | Google                         |
+| csi-hostpath-driver         | minikube | disabled     | Kubernetes                     |
+| dashboard                   | minikube | enabled      | Kubernetes                     |
+```
+
+```bash
+minikube dashboard
+
+```
+> Результат:
+
+```output
+🤔  Verifying dashboard health ...
+🚀  Launching proxy ...
+🤔  Verifying proxy health ...
+🎉  Opening http://127.0.0.1:43019/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/ in your default browser...
+```
+
+![Reference](img/Screenshot_20231115_015355.png)
+
+```bash
+kubectl get all -n kubernetes-dashboard --selector k8s-app=kubernetes-dashboard
+```
+
+> Результат:
+
+```output
+NAME                                        READY   STATUS    RESTARTS      AGE
+pod/kubernetes-dashboard-5c5cfc8747-5m2m8   1/1     Running   9 (38m ago)   11d
+
+NAME                           TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+service/kubernetes-dashboard   ClusterIP   10.100.181.221   <none>        80/TCP    11d
+
+NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/kubernetes-dashboard   1/1     1            1           11d
+
+NAME                                              DESIRED   CURRENT   READY   AGE
+replicaset.apps/kubernetes-dashboard-5c5cfc8747   1         1         1       11d
+```
+
+```bash
+kubectl apply -n dev -f ui-deployment.yml
+```
+
+> Результат:
+
+```output
+NAME                  READY   STATUS    RESTARTS   AGE    IP             NODE       NOMINATED NODE   READINESS GATES
+ui-57f876ddf5-4cxgb   0/1     Pending   0          111s   <none>         <none>     <none>           <none>
+ui-57f876ddf5-k5bd8   1/1     Running   0          111s   10.244.0.250   minikube   <none>           <none>
+ui-57f876ddf5-z2mlm   1/1     Running   0          111s   10.244.0.249   minikube   <none>           <none>
+```
+
+Для разворачивания Managed Kubernetes воспользуемся шагами из домашнего задания [kubernetes-3 Kubernetes. Networks, Storages](#hw30)
+
+---
+
+### Задание со *
+
+1. Разворачивание Managed Service for Kubernetes было выполнено в рамках проектной работы. Настройка terraform манифестов выполнялась по статье [Развертывание и управление организацией и правами доступа через IaC terraform](https://github.com/yandex-cloud/yc-solution-library-for-security/blob/master/auth_and_access/org_iac_iam/README.md) и [Создайте кластер Managed Service for Kubernetes](https://cloud.yandex.ru/docs/managed-kubernetes/operations/kubernetes-cluster/kubernetes-cluster-create)
+
+2. dashboard для kubernetes доступен скачивания на основном сайте [Kubernetes Dashboard](https://github.com/kubernetes/dashboard/tree/master)
+
+в папке kubernetes/infra/dashboard манифесты для создания и скрипт запуска или остановки [dashboard](https://upcloud.com/resources/tutorials/deploy-kubernetes-dashboard) и [Deploying the Dashboard UI](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/), актуальный файл `kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml`
+
+Самой простой способ - это установка из helm'ом [Installing the Chart](https://artifacthub.io/packages/helm/k8s-dashboard/kubernetes-dashboard)
+
+```bash
+helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kubernetes-dashboard
+```
+
+> Результат:
+
+```output
+Release "kubernetes-dashboard" does not exist. Installing it now.
+NAME: kubernetes-dashboard
+LAST DEPLOYED: Wed Nov 15 02:54:51 2023
+NAMESPACE: kubernetes-dashboard
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+*********************************************************************************
+*** PLEASE BE PATIENT: kubernetes-dashboard may take a few minutes to install ***
+*********************************************************************************
+
+Get the Kubernetes Dashboard URL by running:
+  export POD_NAME=$(kubectl get pods -n kubernetes-dashboard -l "app.kubernetes.io/name=kubernetes-dashboard,app.kubernetes.io/instance=kubernetes-dashboard" -o jsonpath="{.items[0].metadata.name}")
+  echo https://127.0.0.1:8443/
+  kubectl -n kubernetes-dashboard port-forward $POD_NAME 8443:8443
+```
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin
+  namespace: kubernetes-dashboard
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: admin
+  namespace: kubernetes-dashboard
+EOF
+
+export POD_NAME=$(kubectl get pods -n kubernetes-dashboard -l "app.kubernetes.io/name=kubernetes-dashboard,app.kubernetes.io/instance=kubernetes-dashboard" -o jsonpath="{.items[0].metadata.name}")
+echo https://127.0.0.1:8443/
+kubectl -n kubernetes-dashboard port-forward $POD_NAME 8443:8443
+
+kubectl create token admin -n kubernetes-dashboard
+```
+![Managed Kubernetes Dashboard](img/Screenshot_20231115_031505.png)
+---
 
 ## <a name="hw31">CI/CD в Kubernetes</a>
 
@@ -59,6 +380,7 @@ aasdhajkshd microservices repository
 1. Установка
 
 Выполнена установка helm пакета
+
 ```bash
 helm version
 ```
