@@ -1,0 +1,4 @@
+!gitlab-omnibus/templates/gitlab-config.yaml
+!gitlab-omnibus/templates/gitlab/gitlab-svc.yaml
+!gitlab-omnibus/templates/ingress/gitlab-ingress.yaml
+gitlab/

@@ -1,0 +1,19 @@
+---
+namespace: dev
+service:
+  names:
+    - post-db
+    - comment-db
+comment:
+  service:
+    externalPort: 9292
+post:
+  service:
+    externalPort: 5000
+databaseHost:
+mongodb:
+  auth:
+    enabled: false
+  usePassword: false
+  mongodbSystemLogVerbosity: 2
+  enableJournal: false

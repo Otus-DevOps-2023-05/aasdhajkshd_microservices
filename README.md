@@ -2,6 +2,12 @@
 
 aasdhajkshd microservices repository
 
+
+> <span style="color:red">INFO</span>
+<span style="color:blue">Информация на картинках, как IP адреса, порты или время, может отличаться от приводимой в тексте.</span>
+
+---
+
 ## Содержание
 
 * [docker-2 Технология контейнеризации. Введение в Docker](#hw16)
@@ -11,13 +17,869 @@ aasdhajkshd microservices repository
 * [monitoring-1 Введение в мониторинг. Системы мониторинга](#hw22)
 * [kubernetes-1 Введение в kubernetes](#hw27)
 * [kubernetes-3 Kubernetes. Networks, Storages](#hw30)
+* [kubernetes-4 CI/CD в Kubernetes](#hw31)
 
-## <a name="hw30">Введение в kubernetes</a>
+## <a name="hw31">CI/CD в Kubernetes</a>
 
-> <span style="color:red">INFO</span>
-<span style="color:blue">Информация на картинках, как IP адреса или время, может отличаться от приводимой в тексте! Суть в это не меняется.</span>
+Список литературы и статей:
+
+- [Менеджер пакетов для Kubernetes](https://helm.sh/ru/)
+- [Setup a Kubernetes Cluster](https://istio.io/v1.7/docs/examples/microservices-istio/setup-kubernetes-cluster/)
+- [Helm 2 vs Helm 3](https://www.hippolab.ru/helm-2-vs-helm-3)
+- [helm/helm](https://get.helm.sh/helm-v2.17.1-linux-amd64.tar.gz)
+- [The Chart Template](https://helm.sh/docs/chart_template_guide/#the-chart-template-developer-s-guide)
+- [Charts](https://helm.sh/docs/topics/charts/)
+- [Метки и селекторы](https://kubernetes.io/ru/docs/concepts/overview/working-with-objects/labels/)
+- [Аннотации](https://kubernetes.io/ru/docs/concepts/overview/working-with-objects/annotations/)
+- [Ingress.yaml template is throwing nil pointer evaluating interface {}.enabled](https://stackoverflow.com/questions/67023533/ingress-yaml-template-is-throwing-nil-pointer-evaluating-interface-enabled)
+- [Основы работы с Helm чартами и темплейтами — Часть 2](https://habr.com/ru/articles/548720/)
+- [Удаление helm 2](https://stackoverflow.com/questions/47583821/how-to-delete-tiller-from-kubernetes-cluster/47583918)
+- [K9s](https://github.com/derailed/k9s)
+- [Docker container build driver](https://docs.docker.com/build/drivers/docker-container/)
+- [docker buildx build](https://docs.docker.com/engine/reference/commandline/buildx_build/#load)
+- [overview of Linux capabilities](https://man7.org/linux/man-pages/man7/capabilities.7.html)
+- [Установка GitLab Runner](https://cloud.yandex.com/en/docs/managed-kubernetes/operations/applications/gitlab-runner)
+- [Running privileged containers for the runners](https://docs.gitlab.com/runner/install/kubernetes.html#running-privileged-containers-for-the-runners)
+- [skopeo](https://github.com/containers/skopeo)
+- [docker buildx imagetools create](https://docs.docker.com/engine/reference/commandline/buildx_imagetools_create/)
+- [What kubernetes permissions does GitLab runner kubernetes executor need?](https://stackoverflow.com/questions/60834960/what-kubernetes-permissions-does-gitlab-runner-kubernetes-executor-need)
+- [Use tags to control which jobs a runner can run](https://docs.gitlab.com/16.5/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run)
+- [Непрерывное развертывание контейнеризованных приложений с помощью GitLab](https://cloud.yandex.ru/docs/managed-kubernetes/tutorials/gitlab-containers)
+- [Установка GitLab Agent](https://cloud.yandex.ru/docs/managed-kubernetes/operations/applications/gitlab-agent)
+- [Environments and deployments](https://docs.gitlab.com/16.5/ee/ci/environments/index.html)
+
+---
 
 #### Выполненные работы
+
+---
+
+### Helm
+
+1. Установка
+
+Выполнена установка helm пакета
+```bash
+helm version
+```
+
+> Результат:
+
+```output
+version.BuildInfo{Version:"v3.12.0", GitCommit:"c9f554d75773799f72ceef38c51210f1842a1dea", GitTreeState:"clean", GoVersion:"go1.20.4"}
+```
+
+```bash
+yc managed-kubernetes cluster start kube-infra
+yc managed-kubernetes cluster get-credentials --name=kube-infra --force --external
+kubectl config get-contexts
+kubectl config use-context yc-kube-infra
+```
+
+> <span style="color:red">WARNING</span>
+> Ниже нет необходимости выполнять установку tiller, так как **helm 3 is tiller less**. Tiller окончательно и безвозвратно удален. Helm 3 использует Kubernetes API напрямую.
+> Но если версия 2-я, то можно и доустановить, ссылка выше в списке статей. Ниже из методички.
+
+```bash
+kubectl apply -f - << EOF > tiller.yml
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tiller
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tiller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: tiller
+    namespace: kube-system
+
+EOF
+
+helm init --service-account tiller
+
+kubectl get pods -n kube-system --selector app=helm
+
+```
+
+> <span style="color:blue">INFO</span>
+> Пространство имен (namespace) в Kubernetes должно существовать до того, как приступить что-то деплоить helm'ом.
+
+2. Charts
+
+```bash
+mkdir -p kubernetes/Charts/{comment,post,reddit,ui}/templates
+
+cat << EOF > kubernetes/Charts/ui/Chart.yaml
+name: ui
+version: 1.0.0
+description: OTUS reddit application UI
+maintainers:
+  - name: OTUS
+    email: name.surname@gmail.com
+appVersion: 1.0
+
+EOF
+
+```
+
+3. Templates
+
+Подготовлена необходимая шаблонная структура Charts
+
+![Структура](img/Screenshot_20231024_232101.png)
+
+Файлы deployment.yaml, service.yaml фактически не различаются и клонировать становится их проще. Далее в CI/CD нужно удалить namespace из yaml файлов. Здесь используются как переменные для изучения.
+
+```bash
+helm lint ui/ comment/ ui/
+```
+
+> Результат:
+
+```output
+==> Linting ui/
+
+==> Linting comment/
+
+==> Linting ui/
+
+3 chart(s) linted, 0 chart(s) failed
+```
+
+4. Управление зависимостями
+
+При выполнении команды:
+
+```bash
+helm dep update reddit --debug
+```
+
+> Результат:
+
+```output
+Repository from local path: file://../ui
+Repository from local path: file://../post
+Repository from local path: file://../comment
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "ingress-nginx" chart repository
+Update Complete. ⎈Happy Helming!⎈
+Saving 3 charts
+Archiving ui from repo file://../ui
+Archiving post from repo file://../post
+Archiving comment from repo file://../comment
+Deleting outdated charts
+```
+
+```bash
+tree reddit; \
+cat reddit/requirements.lock
+```
+
+> Появится файл requirements.lock с фиксацией зависимостей:
+
+```output
+reddit/
+├── charts
+│   ├── comment-1.0.0.tgz
+│   ├── post-1.0.0.tgz
+│   └── ui-1.0.0.tgz
+├── Chart.yaml
+├── requirements.lock
+├── requirements.yaml
+└── values.yaml
+
+2 directories, 7 files
+
+dependencies:
+- name: ui
+  repository: file://../ui
+  version: 1.0.0
+- name: post
+  repository: file://../post
+  version: 1.0.0
+- name: comment
+  repository: file://../comment
+  version: 1.0.0
+digest: sha256:c509eeb70b9d2c7cb6aa1ec88f12d6ce386a0abda19490e59ff71dd893e45553
+generated: "2023-10-25T11:41:23.171523839+03:00"
+```
+
+Поиск репозитория выполняется в [ArtifactHub](https://artifacthub.io/)
+
+```bash
+helm search hub mongo
+```
+
+> https://artifacthub.io/packages/helm/bitnami/mongodb или
+> https://artifacthub.io/packages/helm/microfunctions/mongodb
+
+В учебной документации предлагается установить https://kubernetes-charts.storage.googleapis.com верию 0.4.18.
+
+Если же поиск выполнять в `helm search repo`, то нужно добавить репозиторий [charts](https://charts.helm.sh/stable/)
+Здесь предлагаются актуальные версии, но для приложения reddit подходит или необходима старая версия - 4.2.4.
+
+```bash
+helm repo list
+helm repo add stable https://charts.helm.sh/stable
+helm repo update
+helm search repo stable/mongodb
+```
+
+> Результат:
+
+```output
+stable/mongodb 7.8.10 4.2.4 DEPRECATED NoSQL document-oriented database tha...
+...
+```
+
+В конфигурационном файле указываем версию:
+
+```bash
+cat << EOF >> reddit/requirements.yaml
+
+  - name: mongodb
+    version: 7.8.10
+    repository: https://charts.helm.sh/stable
+
+EOF
+
+helm dep update reddit --debug
+```
+
+> Резльтат `reddit/charts/mongodb-7.8.10.tgz`:
+
+```output
+mongodb/Chart.yaml
+mongodb/values.yaml
+mongodb/templates/NOTES.txt
+mongodb/templates/_helpers.tpl
+mongodb/templates/configmap.yaml
+mongodb/templates/deployment-standalone.yaml
+mongodb/templates/ingress.yaml
+...
+mongodb/.helmignore
+mongodb/OWNERS
+mongodb/README.md
+mongodb/files/docker-entrypoint-initdb.d/README.md
+mongodb/values-production.yaml
+mongodb/values.schema.json
+```
+
+В некоторых атрибутах нельзя использовать переменные, как например, а *app*... оставляем аьрибуты без использования переменных.
+
+```output
+Error: INSTALLATION FAILED: YAML parse error on reddit/charts/comment/templates/deployment.yml: error converting YAML to JSON: yaml: line 22: mapping values are not allowed in this context
+```
+
+Чтобы включить 443 порт, к *ingress.yaml* можно добавить через переменные такие услования:
+
+```yaml
+{{- if .Values.ingress.tls }}
+  tls:
+  {{- range .Values.ingress.tls }}
+    - hosts:
+    {{- range .hosts }}
+      - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+      secretName: {{ .Values.ingress.secretName }}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.ingress.secretName }}
+...
+type: kubernetes.io/tls
+{{- end }}
+```
+
+А в файле переменных *values.yaml* описываем их так:
+
+```yaml
+...
+ingress:
+  enabled: true
+  secretName: ui-ingress-tls
+  hosts:
+  - host: reddit.infranet.dev
+    paths:
+    - path: /
+      backend:
+        service:
+          name: ui
+  tls:
+  - hosts:
+    - reddit.infranet.dev
+...
+```
+
+Раскатка в облако Kubernetes:
+
+```bash
+rm -fR reddit/charts/*; \
+helm uninstall reddit-test; \
+helm dep update reddit && \
+helm install reddit --namespace=dev --debug --name-template reddit-test
+```
+
+> Результат, если выполнилась успешно сборка:
+
+```yaml
+client.go:134: [debug] creating 12 resource(s)
+NAME: reddit-test
+LAST DEPLOYED: Wed Oct 25 13:31:16 2023
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+USER-SUPPLIED VALUES:
+{}
+
+COMPUTED VALUES:
+...
+# Source: post/charts/ui/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: reddit-test-ui
+  namespace: dev
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.allow-http: "false"
+    app.kubernetes.io/instance: reddit-test
+    app.kubernetes.io/managemt-by: Helm
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: "reddit.infranet.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ui
+                port:
+                  number: 80
+  tls:
+    - hosts:
+      - "reddit.infranet.dev"
+      secretName: ui-ingress-tls
+```
+
+Для добавления дополнительных имен (как обращение по FQDN или другим именам) можно использовать *repository:alias* или externalNames в шаблоне `reddit/templates/externalnames.yaml`:
+
+```yaml
+{{- $values := .Values -}}
+{{- $release := .Release -}}
+{{- range $key, $value := .Values.service.names }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $value }}
+  labels:
+    app: reddit
+spec:
+  type: "ExternalName"
+  externalName: {{ printf "%s-mongodb.dev.svc.cluster.local" $release.Name }}
+{{- end}}
+```
+
+А в файле переменных:
+
+```yaml
+---
+service:
+  names:
+    - post-db
+    - comment-db
+comment:
+  service:
+    externalPort: 9292
+post:
+  service:
+    externalPort: 5000
+```
+
+> Результат команды: `helm install reddit/ -n dev --atomic --replace --debug --name-template reddit-test --set auth.enabled=false`:
+
+```bash
+kubectl get service -A --selector=app=reddit
+```
+
+> Результат:
+
+```output
+default     comment-db            ExternalName   <none>          mongo.dev.svc.cluster.local   <none>           104s
+default     post-db               ExternalName   <none>          mongo.dev.svc.cluster.local   <none>           104s
+```
+
+И видно, что добавлены переменные для указания называний узлов в файл *ui/templates/deployment.yaml*:
+
+```yaml
+spec:
+...
+        env:
+        - name: POST_SERVICE_HOST
+          value: {{  .Values.postHost | default (printf "%s-post" .Release.Name) }}
+        - name: POST_SERVICE_PORT
+          value: {{  .Values.postPort | default "5000" | quote }}
+        - name: COMMENT_SERVICE_HOST
+          value: {{  .Values.commentHost | default (printf "%s-comment" .Release.Name) }}
+        - name: COMMENT_SERVICE_PORT
+          value: {{  .Values.commentPort | default "9292" | quote }}
+        - name: ENV
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+```
+
+По заданию без указания значений добавляются переменные в *ui/values.yaml*:
+
+```yaml
+...
+postHost:
+postPort:
+commentHost:
+commentPort:
+```
+
+При тестировании выяснилось, что mongodb от bitnami требует аутентификацию.
+Добавление этих параметров в *values.yml* для тестирования микросервисов обходит требование авторизоваться.
+
+```yaml
+mongodb:
+  auth:
+    enabled: false
+  usePassword: false
+
+```
+
+> Результат:
+
+![](img/Screenshot_20231025_192152.png)
+
+#### GitLab + Kubernetes
+
+1. Установка и внесение изменений в конфигурационные файлы
+
+```bash
+helm repo add gitlab https://charts.gitlab.io
+helm fetch gitlab/gitlab-omnibus --version 0.1.37 --untar
+cd gitlab-omnibus
+helm install --name-template gitlab . -f values.yaml
+```
+
+Данная версия устарела для текущей версии Kubernetes:
+> Most likely the problem is not related to missing CRDs but to the kubernetes version.
+
+> <span style="color:red">WARNING: This chart is deprecated</span>
+
+```output
+Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest: [resource mapping not found for name: "nginx" namespace: "nginx-ingress" from "": no matches for kind "DaemonSet" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "gitlab-gitlab-runner" namespace: "" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "gitlab-gitlab" namespace: "" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "gitlab-gitlab-postgresql" namespace: "" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "gitlab-gitlab-redis" namespace: "" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "kube-lego" namespace: "kube-lego" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "default-http-backend" namespace: "nginx-ingress" from "": no matches for kind "Deployment" in version "extensions/v1beta1"
+ensure CRDs are installed first, resource mapping not found for name: "gitlab-gitlab" namespace: "" from "": no matches for kind "Ingress" in version "extensions/v1beta1"
+ensure CRDs are installed first]
+
+# DEPRECATION NOTICE
+
+This chart is DEPRECATED.
+
+### Replacement
+
+We have built a set of fully cloud native charts in [gitlab/gitlab](https://gitlab.com/charts/gitlab).
+```
+
+[Установка Gitlab](https://docs.gitlab.com/charts/quickstart/)
+
+> Пробуем на актуальных версиях ПО...
+
+```bash
+helm install gitlab gitlab/gitlab \
+  --set global.hosts.domain=infranet.dev \
+  --set certmanager-issuer.email=admin@infranet.dev
+
+```
+```output
+NAME: gitlab
+LAST DEPLOYED: Wed Oct 25 21:49:44 2023
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+NOTES:
+...
+
+    - Ingress objects must be in group/version `networking.k8s.io/v1`.
+
+```
+
+Получим внешний IP адрес:
+
+```bash
+
+kubectl get ingress -lrelease=gitlab
+```
+
+> Результат:
+
+```output
+NAME                        CLASS          HOSTS                   ADDRESS         PORTS     AGE
+gitlab-kas                  gitlab-nginx   kas.infranet.dev        158.160.124.2   80, 443   13m
+gitlab-minio                gitlab-nginx   minio.infranet.dev      158.160.124.2   80, 443   13m
+gitlab-registry             gitlab-nginx   registry.infranet.dev   158.160.124.2   80, 443   13m
+gitlab-webservice-default   gitlab-nginx   gitlab.infranet.dev     158.160.124.2   80, 443   13m
+```
+
+Получить пароль для входа:
+
+```bash
+kubectl get secret gitlab-gitlab-initial-root-password -ojsonpath='{.data.password}' | base64 --decode ; echo
+
+```
+
+Удаление gitlab
+
+```
+helm uninstall gitlab
+```
+
+Сброс пароля root'а
+
+```bash
+kubectl get pods -lrelease=gitlab
+kubectl exec <Webservice pod name> -it -- bash
+/srv/gitlab/bin/rails runner "user = User.first; user.password='#{password}'; user.password_confirmation='#{password}'; user.save!"
+```
+
+Запущен проект `https://gitlab.infranet.dev/23f03013e37f`
+
+![Reddit Deploy](img/Screenshot_20231026_172236.png)
+
+Инициализация проекта в репозиторий Gitlab:
+
+> Отмечю, что предлагается использовать не master, а main как репозиторий по-умолчанию...
+
+```bash
+cd Gitlab_ci/ui
+git init
+git remote add origin git@gitlab.infranet.dev:23f03013e37f/$(basename $(pwd)).git
+git branch -M main
+git add .
+git commit -m "init"
+git push -uf origin main
+
+```
+
+Аналогичные действия выполнены для других папок: comment, post, reddit-deploy
+
+Настройка Gitlab Runner'а для запуска Docker-in-Docker (dind).
+
+Загрузка Chart'а gitlab-runner с сайта:
+
+```bash
+export HELM_EXPERIMENTAL_OCI=1 && \
+helm pull oci://cr.yandex/yc-marketplace/yandex-cloud/gitlab-org/gitlab-runner/chart/gitlab-runner  \
+  --version 0.54.0-8 \
+  --untar && \
+```
+
+В файле *values.yaml* в папке gitlab-runner нужно rbac.create либо false или добавить правила rbac.rules, см. [stackoverflow](https://stackoverflow.com/questions/60834960/what-kubernetes-permissions-does-gitlab-runner-kubernetes-executor-need) и runners.privileged установить значение true
+
+```yaml
+...
+rbac:
+  clusterWideAccess: false
+  create: true
+  podSecurityPolicy:
+    enabled: false
+    resourceNames:
+    - gitlab-runner
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "secrets", "configmaps"]
+      verbs: ["get", "list", "watch", "create", "patch", "delete", "update"]
+    - apiGroups: [""]
+      resources: ["pods/exec", "pods/attach"]
+      verbs: ["create", "patch", "delete"]
+    - apiGroups: [""]
+      resources: ["pods/log"]
+      verbs: ["get"]
+resources: {}
+runnerRegistrationToken: "glrt-rCoCNbEHSJPux9PXGemx"
+runners:
+  cache: {}
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        namespace = "{{.Release.Namespace}}"
+        image = "ubuntu:20.04"
+    {{- if .Values.runners.privileged }}
+        privileged = true
+      [[runners.kubernetes.volumes.empty_dir]]
+        name = "docker-certs"
+        mount_path = "/certs/client"
+        medium = "Memory"
+    {{- end }}
+  locked: false
+  privileged: true
+  tags: ""
+secrets: []
+securityContext:
+  allowPrivilegeEscalation: true
+  capabilities:
+    drop:
+    - ALL
+    add:
+    - CAP_NET_ADMIN
+    - CAP_SYS_ADMIN
+  privileged: true
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+...
+```
+
+Установка helm'ом Gitlab Runner'а (не забываем создать в проекте Gitlab - Runner, а Shared можно отключить, так как нет поддержки dind)
+
+![Gitlab Runner](img/Screenshot_20231029_170717.png)
+
+![Настройки Runner](img/Screenshot_20231029_170840.png)
+
+Нужно прописать полученный token и в файле выше *runnerRegistrationToken* и при установке *runnerToken*.
+
+После получения token'а выполняется установка в свой namespace:
+
+```bash
+helm install --namespace gitlab-runner --create-namespace -f ./gitlab-runner/values.yaml --set gitlabDomain=infranet.dev --set gitlabUrl=https://gitlab.infranet.dev --set runnerToken=glrt-rCoCNbEHSJPux9PXGemx gitlab-runner ./gitlab-runner/
+```
+
+Удаление runner'а:
+
+```bash
+helm uninstall -n gitlab-runner gitlab-runner
+```
+
+```bash
+cat <<EOF | kubectl create -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gitlab-runner-role-default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gitlab-runner
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: gitlab-runner
+EOF
+```
+
+В настройках Gitlab, где указываются переменные CI_REGISTRY_USER, CI_REGISTRY_PASSWORD - это учетные записи [docker.io](https://hub.docker.com/)
+
+В версии Gitlab Runner выше 12.7 нужно указывать *docker* вместо *localhost*
+
+```bash
+# If you're using GitLab Runner 12.7 or earlier with the Kubernetes executor and Kubernetes 1.6 or earlier,
+# the variable must be set to tcp://localhost:2375 because of how the
+# Kubernetes executor connects services to the job container
+# DOCKER_HOST: tcp://localhost:2375
+#
+DOCKER_HOST: tcp://docker:2375
+```
+
+При сборке post в Gitlab CI/CD было следующее уведомление:
+
+> "No output specified with docker-container driver. Build result will only remain in the build cache. To push result image into registry use --push or to load image into docker use --load"
+
+Далее процесс отправки образа в `docker.io` завершался ошибкой:
+
+```output
+docker push index.docker.io/23f03013e37f/post:test
+The push refers to repository [docker.io/23f03013e37f/post]
+An image does not exist locally with the tag: 23f03013e37f/post
+Cleaning up project directory and file based variables
+00:00
+ERROR: Job failed: command terminated with exit code 1
+```
+
+Проблему удалось решить путем настройки аутентификации докера раньше сборки, а при сборке использовать ключ --push в *.gitlab-ci.yml*:
+
+```bash
+docker buildx build -t "$CI_APPLICATION_REPOSITORY:$CI_APPLICATION_TAG" --platform=linux/amd64 --push .
+```
+
+Так как образ уже собран в Registry docker.io, чтобы не "гонять" еще раз после build'а для указания версии, есть возмоджность просто изменить манифест командой:
+
+```bash
+docker buildx imagetools create "$CI_APPLICATION_REPOSITORY:$CI_APPLICATION_TAG" --tag "$CI_APPLICATION_REPOSITORY:$(cat VERSION)"
+```
+
+> Результат:
+
+![23f03013e37f/post:0.0.2](img/Screenshot_20231029_171848.png)
+
+Для заруска задачи (Job) в отдельном Kubernetes POD-е доавлены атрибуты *tags* в CI/CD Runner и в `.gitlab-ci.yml`
+
+[Пайплайн здорового человека](src/ui/.gitlab-ci.yml) для *ui* можно посмотреть здесь, рабочий вариант... для [reddit-deploy](kubernetes/Charts/.gitlab-ci.yml).
+
+Чтобы запустить CI/CD в Environment: staging, production нужно подключить кластер Kubernetes к Gitlab,
+
+Поэтому выполнить настройку аутентификацию Kubernetes в GitLab необходимо.
+
+По документации нужно создать подключение к кластеру, прямо в строке поиска агента указываем имя и создать:
+
+![Operate/Kubernetes clusters](img/Screenshot_20231030_163800.png)
+
+![Operate/Kubernetes clusters](img/Screenshot_20231030_175352.png)
+
+Установка Gitlab Agent с помощью Helm-чарта (версия должна быть совместима с Gitlab, можно взять с картинки):
+
+```bash
+export HELM_EXPERIMENTAL_OCI=1 && \
+helm pull oci://cr.yandex/yc-marketplace/yandex-cloud/gitlab-org/gitlab-agent/chart/gitlab-agent \
+  --version 1.16.0-1 \
+  --untar && \
+helm upgrade --install \
+  --namespace gitlab-agent-infra \
+  --create-namespace \
+  --set serviceAccount.create=false \
+  --set rbac.create=false \
+  --set rbac.useExistingRole=gitlab-runner-role-default \
+  --set config.kasAddress='wss://kas.infranet.dev/-/kubernetes-agent/' \
+  --set config.token='glagent-JyfC-qffZHonby8YTCykmzFDz8shGXaJxX9g2bpDL3c17QFyLA' \
+  gitlab-agent ./gitlab-agent/
+```
+
+Если RBAC указывается true, то, возможно, нужно добавить роль (ранее нужно было такое же делать для Runner'а):
+
+```bash
+cat <<EOF | kubectl create -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitlab-agent
+  namespace: gitlab-agent-infra
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "get", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+EOF
+```
+
+В меню Operation/Environments, там же есть подсказка по review:
+
+![Enable Review Apps](img/Screenshot_20231030_164645.png)
+
+```yaml
+deploy_review:
+  stage: deploy
+  script:
+    - echo "Add script here that deploys the code to your infrastructure"
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    url: https://$CI_ENVIRONMENT_SLUG.infranet.dev
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
+[](https://docs.gitlab.com/16.5/ee/ci/variables/predefined_variables.html)
+[Types of environments](https://docs.gitlab.com/16.5/ee/ci/environments/index.html#types-of-environments)
+
+Чтобы заработала связка Gitlab и Kubernetes, полезно воспользоваться этой [статьей](https://docs.gitlab.com/ee/user/clusters/agent/ci_cd_workflow.html), в Envrironment добавил KUBE_CONFIG из *~/.kube/config* и при выполнении docker'ом в CI Pipeline'е можно было увидеть context, который был выставлен:
+
+![Kubernetes Context Agent](img/Screenshot_20231031_080044.png)
+
+Далее выяснилось, что используемый helm-3 имеет проблему:
+
+> manager.go:107: warning: a valid Helm v3 hash was not found. Checking against Helm v2 hash...
+> Error: the lock file (requirements.lock) is out of sync with the dependencies file (requirements.yaml). Please update the dependencies
+>
+Возможно, нужно не публиковать requirements.lock в *.gitignore* и еще актуальная версия helm'а, если использовать просто image: alpine - [3.13.1](https://get.helm.sh/helm-v3.13.1-linux-amd64.tar.gz)
+
+Но переделал способ - это использовать уже **alpine/helm** образ (взято из лекционного материала):
+
+```yaml
+test:
+  stage: test
+  image:
+    name: alpine/helm
+    entrypoint: ["/bin/sh","-c"]
+  variables:
+    KUBE_CONTEXT: 23f03013e37f/reddit-deploy:reddit-deploy
+    KUBE_NAMESPACE: staging
+  environment: test
+  script:
+    - install_dependencies
+    - ensure_namespace
+    - deploy
+  only:
+    - branches
+```
+
+Опытном путём выяснилось, что всё же не нужен KUBE_CONFIG/KUBECONFIG - yaml-файл указывать в переменных в Gitlab-Project-Settings-CI/CD-Variables, KUBECONFIG - файл, будет виден в `set` из преременной `KUBECONFIG=/builds/23f03013e37f/reddit-deploy.tmp/KUBECONFIG`
+
+Сложно было [разобраться](https://docs.gitlab.com/ee/user/clusters/agent/ci_cd_workflow.html#update-your-gitlab-ciyml-file-to-run-kubectl-commands), какой-же всё же контекст:
+<gitlab-group>/<project-name>:<agent-folder-name>, где *agent-folder-name*, берется из .gitlab/agents/<agent-folder-name>/config.yaml
+
+```yaml
+user_access:
+  access_as:
+    agent: {}
+  projects:
+    - id: 23f03013e37f/reddit-deploy
+ci_access:
+  projects:
+    - id: 23f03013e37f/reddit-deploy
+  groups:
+    - id: 23f03013e37f
+observability:
+  logging:
+    level: debug
+
+```
+
+В *gitlab-ci.yml* в ui.image.tag подправлен путь в команде helm'а - добавлен '/-/' в `/ui/-/raw/main/VERSION`
+
+Далее задать своего агента можно и через переменную:
+
+![Kube Context Variable](img/Screenshot_20231031_125718.png)
+
+Все остальные действия уже чисто дело техники, сам процесс уже понятен... :-)
+
+![](img/Screenshot_20231031_145820.png)
+
+Альтернатива агенту по схеме pull - [Flux](https://docs.gitlab.com/ee/user/clusters/agent/#gitops-workflow)
+
+Файлы `.gitlab-ci.yml` скопированы из Gitlab_ci в папку src/{ui,post-py,comment} и для reddit-deploy - в charts.
+
+---
+
+## <a name="hw30">Введение в kubernetes</a>
 
 Список литературы и статей:
 
@@ -37,6 +899,7 @@ aasdhajkshd microservices repository
 - [Динамическая подготовка тома](https://cloud.yandex.ru/docs/managed-kubernetes/operations/volumes/dynamic-create-pv)
 - [Управление классами хранилищ](https://cloud.yandex.ru/docs/managed-kubernetes/operations/volumes/manage-storage-class#sc-default)
 - [kubectl Cheat Sheet](https://kubernetes.io/docs/reference/kubectl/cheatsheet/)
+- [A visual guide on troubleshooting Kubernetes deployments](https://learnk8s.io/troubleshooting-deployments)
 
 Абстракции над подами
 
@@ -48,6 +911,12 @@ aasdhajkshd microservices repository
 - [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) — запускает Job по крону (расписанию)
 
 Так как на странице **24** домашнего задания представлена картинка управлеяемого кластера, выполнение пунктов выполнялась с установкой Yandex Managed Service для Kubernetes кластере *infra-kube*.
+
+---
+
+#### Выполненные работы
+
+---
 
 ### Создание управляемого кластера для Kubernetes в YC
 
@@ -558,7 +1427,7 @@ helm upgrade \
 --set folderId=$YC_FOLDER_ID \
 --set clusterId=$YC_CLUSTER_ID \
 --install ingress-nginx ingress-nginx \
---set-file saKeySecretKey=../../kubernetes/infra/.secrets/$YC_SVC_ACCT \
+--set-file saKeySecretKey=../../kubernetes/infra/.secrets/$YC_SVC_ACCT.json \
 --repo https://kubernetes.github.io/ingress-nginx \
 --atomic
 ```
@@ -933,12 +1802,11 @@ kubectl apply -n dev -f mongo-deployment.yml
 - `kubectl port-forward` — пробросить порт из Kubernetes на локальный хост
 - `kubectl exec` — выполнить команду внутри запущенного контейнера
 
+Если что-то не получается, может это поможет?
+![Troubleshooting Kubernetes](img/troubleshooting-kubernetes.ru_ru.v2.png)
+---
 
 ## <a name="hw27">Введение в kubernetes</a>
-
-#### Выполненные работы
-
-1. Выполнены изучение и разбор на практике всех компонентов Kubernetes
 
 Список литературы и статей:
 
@@ -954,6 +1822,14 @@ kubectl apply -n dev -f mongo-deployment.yml
 - https://habr.com/ru/companies/domclick/articles/682364
 - https://www.linuxtechi.com/install-kubernetes-on-ubuntu-22-04
 - https://www.linuxsysadmins.com/install-kubernetes-cluster-with-ansible
+
+---
+
+#### Выполненные работы
+
+---
+
+1. Выполнены изучение и разбор на практике всех компонентов Kubernetes
 
 2. Установка k8s на двух узлах при помощи утилиты kubeadm
 
@@ -1386,9 +2262,9 @@ kubernetes_worker_instance = [
 kubernetes_worker_ip_address = "158.160.99.62"
 ```
 
-Статус кластера
+Статус кластера:
+
 ```output
-```bash
 Welcome to Ubuntu 20.04.6 LTS (GNU/Linux 5.4.0-163-generic x86_64)
 
 * Documentation:  https://help.ubuntu.com
@@ -1460,18 +2336,20 @@ ansible-playbook playbooks/k8s_deploy.yml
 
 Ресурсы и статьи по Ansible помимо официального сайта, которые помогли с написанием playbook'ов:
 
-- https://github.com/geerlingguy/ansible-role-kubernetes/tree/master
-- https://spec-zone.ru/ansible~2.10/cli/ansible-playbook
-- https://opendev.org/starlingx/ansible-playbooks/commit/c52980d44be5841d81e91d3ea0de94ca1bb9f69a
-- https://github.com/torgeirl/kubernetes-playbooks/blob/master/playbooks/kube-dependencies.yml
-- https://www.linuxsysadmins.com/install-kubernetes-cluster-with-ansible/
-- https://sidmid.ru/%d1%80%d0%b0%d0%b1%d0%be%d1%82%d0%b0%d1%82%d1%8c-%d1%81-terraform-%d0%b2-yandex-%d0%be%d0%b1%d0%bb%d0%b0%d0%ba%d0%b5/
-- https://www.ipify.org/
-- https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/
-- https://groups.google.com/g/ansible-project/c/TkDRbw1ques
-- https://www.educba.com/ansible-debug/
-- https://www.reddit.com/r/ansible/comments/wqxmoh/print_list_to_separate_lines/
-- https://habr.com/ru/companies/slurm/articles/706920/
+- [ansible-role-kubernetes](https://github.com/geerlingguy/ansible-role-kubernetes/tree/master)
+- [ansible - сборник пьес](https://spec-zone.ru/ansible~2.10/cli/ansible-playbook)
+- [starlingx/ansible-playbooks](https://opendev.org/starlingx/ansible-playbooks/commit/c52980d44be5841d81e91d3ea0de94ca1bb9f69a)
+- [torgeirl/kubernetes-playbooks](https://github.com/torgeirl/kubernetes-playbooks/blob/master/playbooks/kube-dependencies.yml)
+- [Install Kubernetes Cluster with Ansible on Ubuntu in 5 minutes](https://www.linuxsysadmins.com/install-kubernetes-cluster-with-ansible/)
+- [работать с Terraform в yandex облаке](https://sidmid.ru/%d1%80%d0%b0%d0%b1%d0%be%d1%82%d0%b0%d1%82%d1%8c-%d1%81-terraform-%d0%b2-yandex-%d0%be%d0%b1%d0%bb%d0%b0%d0%ba%d0%b5/)
+- [A Simple Public IP Address API](https://www.ipify.org/)
+- [kubeadm Configuration (v1beta3)](https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta3/)
+- [List of all ansible_ssh_host in group](https://groups.google.com/g/ansible-project/c/TkDRbw1ques
+- [Ansible Debug](https://www.educba.com/ansible-debug/)
+- [Print list to separate lines](https://www.reddit.com/r/ansible/comments/wqxmoh/print_list_to_separate_lines/)
+- [Основы автоматизации в Ansible: роли и сценарии](https://habr.com/ru/companies/slurm/articles/706920/)
+
+---
 
 ## <a name="hw22">Введение в мониторинг. Системы мониторинга</a>
 
@@ -1552,12 +2430,19 @@ docker-compose up -d
 #### Сбор метрик хоста
 
 1. В файлы *docker/docker-compose.yml* и *monitoring/prometheus/prometheus.yml* внсенена информация по новому сервису - node-exporter. Перезапущены сервисы.
+
 2. В списке Status/Targets'ов новый узел
+
 ![](img/Screenshot_20230927_044159.png)
+
 3. Ведется сбор данных
+
 ![](img/Screenshot_20230927_044434.png)
+
 4. Проверка мониторинга
+
 ![](img/Screenshot_20230927_044705.png)
+
 5. Образы загружены на DockerHub и доступны по ссылкам
 
 > <https://hub.docker.com/repository/docker/23f03013e37f/ui>
@@ -1643,9 +2528,11 @@ modules:
 ```
 
 1. В файл docker/docker-compose.yml добавлен сервис blackbox-exporter
+
 2. В файл *monitoring/prometheus/prometheus.yml* добавлен target для Cloudprober
 
 3. blackbox запустился в Prometheus
+
 ![](img/Screenshot_20230927_113103.png)
 
 #### Задания со *star*
@@ -1678,6 +2565,8 @@ make push-[ui|post|comment|prometheus|blackbox]
 ```
 make [build|push]-all
 ```
+
+---
 
 ## <a name="hw20">Устройство Gitlab CI. Построение процесса непрерывной поставки</a>
 
@@ -1721,8 +2610,10 @@ variable "builds" {
 }
 ```
 
-И для раскатки 'gitlab-ci' *docker*'а генерирует из динамического шаблона *inventory.json.tpl* для **ansible** инвентори с внешним IP-адресом, который будет использоваться при установке контейнера 'gitlab-ce:latest', как переменная в шаблоне *docker-compose.yml.j2* и для пункта со \<\*\> в модуле **docker_container**. Так же предусмотрена в **ansible** проверка *gitlab* контейнера и вывод пароля иницализации. Playbook'и организованы с ролями для docker и gitlab.
+И для раскатки 'gitlab-ci' *docker*'а генерирует из динамического шаблона *inventory.json.tpl* для **ansible** инвентори с внешним IP-адресом, который будет использоваться при установке контейнера 'gitlab-ce:latest', как переменная в шаблоне *docker-compose.yml.j2* и для пункта со **\<\*\>** в модуле **docker_container**. Так же предусмотрена в **ansible** проверка *gitlab* контейнера и вывод пароля иницализации. Playbook'и организованы с ролями для docker и gitlab.
+
 3. Чтобы решить ошибку недоступности подключения **ansible** к установленной виртуальной машине сразу. использовался дополнительные модуль 'ansible.builtin.wait_for_connection' и проверкой доступности docker контейнера.
+
 4. Установка решения выполняется двумя командами:
 
 ```bash
@@ -1731,13 +2622,14 @@ terraform -chdir=terraform/stage/ apply -auto-approve
 ```
 
 См. лог gitlab-ci/infra/packer-ansible.md и gitlab-ci/infra/terraform-ansible.md
+
 5. Можно отдельно запускать сам *ansible-playbook*
 
 ```bash
 ansible-playbook -i ../terraform/stage/inventory.json playbooks/gitlab.yml
 ```
 
-8. Проверка работы докера можно выполнить по ssh:
+6. Проверка работы докера можно выполнить по ssh:
 
 ```bash
 ssh -l ubuntu -i ~/.ssh/id_rsa-appuser 158.160.60.194 docker inspect -f {{.State.Health.Status}} gitlab
@@ -1747,13 +2639,13 @@ ssh -l ubuntu -i ~/.ssh/id_rsa-appuser 158.160.60.194 docker inspect -f {{.State
 healthy
 ```
 
-8. Для получения пароля можно воспользоавться прочтением файла или через **ansible** или *output.tf* из **terraform**
+7. Для получения пароля можно воспользоавться прочтением файла или через **ansible** или *output.tf* из **terraform**
 
 ```bash
 ssh -l ubuntu -i ~/.ssh/id_rsa-appuser 158.160.60.194 sudo grep -i 'password:' /srv/gitlab/config/initial_root_password
 ```
 
-9. Если пароль забыт, можно сбросить
+8. Если пароль забыт, можно сбросить
 
 > <https://docs.gitlab.com/ee/security/reset_user_password.html#reset-your-root-password>
 
@@ -1762,9 +2654,11 @@ docker exec -it gitlab bash
 gitlab-rake 'gitlab:password:reset[root]'
 ```
 
-10. После подключения к Gitlab web сайту, выполнено отключение регистрации.
-11. Добавлена группа homework, репозиторий example, выполнены пункты задания 4.
-12. Зарегистрирован Runner и получен token.
+9. После подключения к Gitlab web сайту, выполнено отключение регистрации.
+
+10. Добавлена группа homework, репозиторий *example*, выполнены пункты задания 4.
+
+11. Зарегистрирован Runner и получен token.
 
 > Проверить, что "Run untagged jobs" установлен.
 > Indicates whether this runner can pick jobs without tags
@@ -1773,7 +2667,7 @@ gitlab-rake 'gitlab:password:reset[root]'
 gitlab-runner register --url http://158.160.60.194 --token glrt-CXJApPiVyyGssWMxWVVD
 ```
 
-1. Добавлен Runner (и как установка в playbook *gitlab.yml*)
+12. Добавлен Runner (и как установка в playbook *gitlab.yml*)
 
 ```bash
 docker run -d --name gitlab-runner --restart always -v /srv/gitlab-runner/config:/etc/gitlab-runner -v /var/run/docker.sock:/var/run/docker.sock gitlab/gitlab-runner:latest
@@ -1785,7 +2679,7 @@ ea79446f5691   gitlab/gitlab-runner:latest   "/usr/bin/dumb-init …"   6 minute
 2710b85663fa   gitlab/gitlab-ce:latest       "/assets/wrapper"        2 hours ago     Up 2 hours (healthy)   0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, 0.0.0.0:2222->22/tcp   gitlab
 ```
 
-1. Регистрация Runner'а
+13. Регистрация Runner'а
 
 ```bash
 docker exec -it gitlab-runner gitlab-runner register \
@@ -1810,7 +2704,7 @@ Runner registered successfully. Feel free to start it, but if it's running alrea
 Configuration (with the authentication token) was saved in "/etc/gitlab-runner/config.toml"
 ```
 
-15. Добавлен Reddit в проект, изменен файл .gitlab-ci.yml и добавлен файл simpletest.rb
+14. Добавлен Reddit в проект, изменен файл .gitlab-ci.yml и добавлен файл simpletest.rb
 
 ```bash
 git clone https://github.com/express42/reddit.git && rm -rf ./reddit/.git
@@ -1819,12 +2713,18 @@ git commit -m "Add reddit app"
 git push gitlab gitlab-ci-1
 ```
 
-16. Пройдены тесты в pipeline'е пунктов ДЗ 6.2
-17. Добавлены окружения dev, staging, production и выполнены их проверки пунктов ДЗ 7.X
+15. Пройдены тесты в pipeline'е пунктов ДЗ 6.2
+
+16. Добавлены окружения dev, staging, production и выполнены их проверки пунктов ДЗ 7.X
+
 ![](img/Screenshot_20230924_174725.png)
-18. Проверены условия, ограничения ручной запуск пунктов ДЗ 8.X
+
+17.  Проверены условия, ограничения ручной запуск пунктов ДЗ 8.X
+
 ![](img/Screenshot_20230924_173919.png)
-19. Проверено добавление динамических окружений пунктов ДЗ 9.X
+
+18.  Проверено добавление динамических окружений пунктов ДЗ 9.X
+19.
 ![](img/Screenshot_20230924_173702.png)
 
 #### Задания со *star*
@@ -1900,8 +2800,11 @@ build_job:
 ```
 
 Прохождение этапа формирования образа docker-in-docker (dind)
+
 ![](img/Screenshot_20230925_142047.png)
 ![](img/Screenshot_20230925_142118.png)
+
+---
 
 ## <a name="hw18">Docker сети, docker-compose</a>
 
@@ -2090,7 +2993,12 @@ b713005ef641   "puma"                   7 minutes ago   Up 6 minutes   0.0.0.0:9
 2. Для изменения настроек приложения, возможно выполнить подключечния тома, как и для БД.
 
 ```bash
-$ docker-machine ssh docker-host sudo ls -Al /var/lib/docker/volumes/src_ui_app/_data
+docker-machine ssh docker-host sudo ls -Al /var/lib/docker/volumes/src_ui_app/_data
+```
+
+> Результат:
+
+```output
 total 48
 -rw-r--r-- 1 root root  396 Sep 13 09:01 config.ru
 ...
@@ -2099,18 +3007,31 @@ total 48
 3. Для запуска puma приложений в режиме диагностики с двумя процессами *--debug* и *-w 2* можно добавить **command**: puma --debug -w 2
 
 ```bash
-$ docker ps
+docker ps
+```
+
+> Результат:
+
+```output
 CONTAINER ID   IMAGE                      COMMAND                  CREATED         STATUS         PORTS                                       NAMES
 f441fae2fbcd   23f03013e37f/ui:1.0        "puma --debug -w 2"      9 seconds ago   Up 4 seconds   0.0.0.0:8080->9292/tcp, :::8080->9292/tcp   src-ui-1
 ...
 
-$ docker logs $(docker ps -a -q --filter "name=src-ui-1") | head -5
+```bash
+docker logs $(docker ps -a -q --filter "name=src-ui-1") | head -5
+```
+
+> Результат:
+
+```output
 [1] Puma starting in cluster mode...
 [1] * Version 3.10.0 (ruby 2.3.1-p112), codename: Russell's Teapot
 [1] * Min threads: 0, max threads: 16
 [1] * Environment: development
 [1] * Process workers: 2
 ```
+
+---
 
 ## <a name="hw17">Микросервисы</a>
 
