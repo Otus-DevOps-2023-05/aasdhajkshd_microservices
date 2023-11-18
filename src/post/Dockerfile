@@ -6,7 +6,7 @@ COPY VERSION *.py requirements.txt VERSION ./
 RUN apk --no-cache --update add build-base \
     && pip install --upgrade pip \
     && pip install -r /app/requirements.txt
-RUN apk --no-cache --update add bash vim iputils \
+RUN apk --no-cache --update add bash vim iputils gcc musl-dev \
     && apk del build-base
 
 ENV POST_DATABASE_HOST post_db
