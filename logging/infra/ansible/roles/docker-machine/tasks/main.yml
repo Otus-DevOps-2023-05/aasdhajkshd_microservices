@@ -1,0 +1,143 @@
+---
+- name: Wait for system to become reachable
+  wait_for_connection:
+
+- name: Gather facts for the first time
+  setup:
+
+- fail:
+    msg: "OS should be Ubuntu {{ required_os_version }}, not {{ ansible_distribution }} {{ ansible_distribution_version }}"
+  when: ansible_distribution != 'Ubuntu' or ansible_distribution_version != '20.04'
+
+- name: Install dependencies
+  apt:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+    update_cache_retries: 3
+    install_recommends: false
+  loop:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - wget
+    - gnupg
+    - net-tools
+    - bridge-utils
+    - vim
+
+- name: Add go repository from PPA
+  ansible.builtin.apt_repository:
+    repo: 'ppa:longsleep/golang-backports'
+
+- name: Install some packages
+  apt:
+    name: "{{ item }}"
+    state: latest
+    update_cache: true
+  loop:
+    - ctop
+    - golang-go
+
+- name: Creating a file with content
+  copy:
+    dest: "/etc/docker/daemon.json"
+    content: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"]
+      }
+  notify: Reload docker service
+
+- name: Check docker is active
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Ensure group "docker" exists
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Adding user to docker group
+  user:
+    name: "{{ ssh_user }}"
+    groups: docker
+    append: yes
+
+- name: Install docker-compose
+  get_url:
+    url: https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64
+    dest: /usr/local/bin/docker-compose
+    mode: 'u+rwx,g+rx'
+  notify: Docker Compose Standalone version
+
+- name: Change file ownership, group and permissions
+  ansible.builtin.file:
+    path: /usr/local/bin/docker-compose
+    owner: "{{ ssh_user }}"
+    group: docker
+    mode: "0755"
+
+- name: Install docker-machine
+  get_url:
+    url: https://github.com/docker/machine/releases/download/v0.16.2/docker-machine-Linux-x86_64
+    dest: /usr/local/bin/docker-machine
+    mode: 'u+rwx,g+rx'
+  notify: Docker Machine Standalone version
+
+- name: Creating a key with content
+  become: false
+  copy:
+    dest: "/home/{{ ssh_user }}/key.json"
+    content: |
+      {
+        "id": "ajed139mqq9n1922s11e",
+        "service_account_id": "ajecppg8u7t4ps7con89",
+        "created_at": "2023-11-17T10:00:55.063031808Z",
+        "key_algorithm": "RSA_2048",
+        "public_key": "-----BEGIN PUBLIC KEY-----\n\n-----END PUBLIC KEY-----\n",
+        "private_key": "PLEASE DO NOT REMOVE THIS LINE! Yandex.Cloud SA Key ID \u003cajed139mqq9n1922s11e\u003e\n-----BEGIN PRIVATE KEY-----\n\n-----END PRIVATE KEY-----\n"
+      }
+
+- name: Create a go directory if it does not exist
+  become: false
+  ansible.builtin.file:
+    path: /home/{{ ssh_user }}/go/bin
+    state: directory
+    mode: '0755'
+
+- name: Set path in profile
+  become: false
+  ansible.builtin.lineinfile:
+    dest: /home/{{ ssh_user }}/.bashrc
+    insertafter: EOF
+    line: "export PATH=$PATH:$HOME/go/bin"
+
+- name: Set folder-id in profile
+  become: false
+  ansible.builtin.lineinfile:
+    dest: /home/{{ ssh_user }}/.bashrc
+    insertafter: EOF
+    line: "export YC_FOLDER_ID={{ yc_folder_id }}"
+
+- name: Set folder_id in profile
+  become: false
+  ansible.builtin.lineinfile:
+    dest: /home/{{ ssh_user }}/.bashrc
+    insertafter: EOF
+    line: "export YC_FOLDER_ID={{ yc_folder_id }}"
+
+- name: Set sa_key_path in profile
+  become: false
+  ansible.builtin.lineinfile:
+    dest: /home/{{ ssh_user }}/.bashrc
+    insertafter: EOF
+    line: "export SA_KEY_PATH=$HOME/key.json"
+
+- name: Install yandex driver
+  become: false
+  ansible.builtin.command: "{{ item }}"
+  with_items:
+  - go mod init github.com/yandex-cloud/docker-machine-driver-yandex
+  - go install github.com/yandex-cloud/docker-machine-driver-yandex@latest

@@ -1,0 +1,178 @@
+---
+- import_playbook: docker_install.yml
+- name: Install logging services
+  hosts: logging
+  remote_user: "{{ ssh_user }}"
+  become: false
+  gather_facts: false
+  vars:
+    ssh_user: ubuntu
+  tasks:
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: /home/{{ ssh_user }}/docker
+        state: directory
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+        mode: '0755'
+    - name: Create en .env file
+      copy:
+        content: |
+          USERNAME=23f03013e37f
+          FLUENTD_VERSION=logging
+          PROMETHEUS_VERSION=2.1.0
+          COMPOSE_PROJECT_NAME=logging
+        dest: /home/{{ ssh_user }}/docker/.env
+        force: no
+    - name: Create en docker-compose.yml file
+      copy:
+        content: |
+          version: '3'
+          services:
+            zipkin:
+              image: openzipkin/zipkin:2.21.0
+              ports:
+                - "9411:9411"
+            fluent-bit:
+              image: ${USERNAME}/fluent-bit:${FLUENTD_VERSION}
+              ports:
+                - "24224:24224"
+                - "24224:24224/udp"
+              depends_on:
+                - elasticsearch
+            elasticsearch:
+              image: elasticsearch:7.17.3
+              environment:
+                - discovery.type=single-node
+              expose:
+                - "9200"
+              ports:
+                - "9200:9200"
+            kibana:
+              image: kibana:7.17.3
+              ports:
+                - "5601:5601"
+        dest: /home/{{ ssh_user }}/docker/docker-compose.yml
+        force: no
+      register: output
+    - name: Show results
+      ansible.builtin.debug:
+        var: output
+    - name: Reset ssh connection
+      meta: reset_connection
+    - name: Run container
+      shell:
+        cmd: "docker-compose -f /home/{{ ssh_user }}/docker/docker-compose.yml up -d"
+        chdir: /home/{{ ssh_user }}/docker/
+- name: Install applications services
+  hosts: host
+  remote_user: "{{ ssh_user }}"
+  vars:
+    ssh_user: ubuntu
+  gather_facts: false
+  become: false
+  tasks:
+    - debug:
+        msg:
+          - "The logging host IP is {{ hostvars[groups.logging.0].ansible_host }}"
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: /home/{{ ssh_user }}/docker
+        state: directory
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+        mode: '0755'
+    - name: Create en .env file
+      copy:
+        content: ""
+        dest: /home/{{ ssh_user }}/docker/.env
+        force: no
+    - name: Setting environment
+      blockinfile:
+        path: /home/{{ ssh_user }}/docker/.env
+        block: |
+          USERNAME=23f03013e37f
+          PORT=9292
+          UI_VERSION=latest
+          POST_VERSION=logging
+          COMMENT_VERSION=logging
+          DB_VERSION=4.4.24
+          PROMETHEUS_VERSION=2.1.0
+          COMPOSE_PROJECT_NAME=logging
+          ZIPKIN_ENABLED=true
+    - name: Create en docker-compose.yml file
+      copy:
+        content: |
+          version: '3.3'
+          name: logging
+          services:
+            post_db:
+              image: mongo:${DB_VERSION}
+              volumes:
+                - post_db:/data/db
+              networks:
+                - back_net
+            ui:
+              image: ${USERNAME}/ui:${UI_VERSION}
+              environment:
+                - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+              ports:
+                - ${PORT}:9292/tcp
+              networks:
+                - front_net
+              depends_on:
+                - post_db
+                - post
+                - comment
+              command: puma --debug -w 2
+              logging:
+                driver: "fluentd"
+                options:
+                  fluentd-address: "{{ hostvars[groups.logging.0].ansible_host }}:24224"
+                  tag: service.ui
+            post:
+              image: ${USERNAME}/post:${POST_VERSION}
+              environment:
+                - COMPOSE_PROJECT_NAME
+                - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+              networks:
+                - back_net
+                - front_net
+              logging:
+                driver: "fluentd"
+                options:
+                  fluentd-address: "{{ hostvars[groups.logging.0].ansible_host }}:24224"
+                  tag: service.post
+            comment:
+              image: ${USERNAME}/comment:${COMMENT_VERSION}
+              environment:
+                - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+              networks:
+                - back_net
+                - front_net
+          volumes:
+            post_db:
+            prometheus_data:
+          networks:
+            front_net:
+              ipam:
+                config:
+                  - subnet: 10.0.1.0/24
+            back_net:
+              ipam:
+                config:
+                  - subnet: 10.0.2.0/24
+        dest: /home/{{ ssh_user }}/docker/docker-compose.yml
+        force: no
+      register: output
+    - name: Show results
+      ansible.builtin.debug:
+        var: output
+      register: output
+    - name: Reset ssh connection
+      meta: reset_connection
+    - name: Run container
+      become: false
+      shell:
+        cmd: "docker-compose -f docker-compose.yml up -d"
+        chdir: /home/{{ ssh_user }}/docker/

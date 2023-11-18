@@ -1,0 +1,8 @@
+---
+- name: Install docker
+  hosts: all
+  remote_user: "{{ ssh_user }}"
+  become: true
+  gather_facts: false
+  roles:
+    - docker

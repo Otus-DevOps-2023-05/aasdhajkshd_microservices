@@ -19,6 +19,371 @@ aasdhajkshd microservices repository
 * [kubernetes-3 Kubernetes. Networks, Storages](#hw30)
 * [kubernetes-4 CI/CD в Kubernetes](#hw31)
 * [kubernetes-2 Kubernetes. Запуск кластера и приложения. Модель безопасности](#hw29)
+* [logging-1 Логирование и распределенная трассировка](#hw25)
+
+---
+
+## <a name="hw25">Логирование и распределенная трассировка</a>
+
+#### Выполненные работы
+
+---
+
+Подготовка окружения docker-хост с именем logging в Yandex.Cloud и настройка локального окружение на работу с ним
+
+```bash
+YC_HOSTNAME="docker-host"
+
+yc compute instance create \
+ --name ${YC_HOSTNAME} \
+ --zone ru-central1-a \
+ --core-fraction 50 \
+ --cores 4 \
+ --memory 4GB \
+ --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+ --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-2004-lts,size=40,type=network-ssd \
+ --ssh-key ~/.ssh/id_rsa-appuser.pub \
+ | awk '/nat:/ { getline; print $2}'
+
+YC_HOST_IP=$(yc compute instance list --format json | jq ".[] | select (.name == \"${YC_HOSTNAME}\") | .network_interfaces[0].primary_v4_address.one_to_one_nat.address" | tr -d '"')
+
+cat << EOF > docker/ansible/environment/stage/inventory.json
+{
+  "all": {
+    "hosts": {
+      "docker-host" : {
+        "ansible_host": "$YC_HOST_IP"
+      }
+    }
+  }
+}
+EOF
+
+# docker-machine rm -f ${YC_HOSTNAME}
+
+docker-machine create \
+ --driver generic \
+ --generic-ip-address=$YC_HOST_IP \
+ --generic-ssh-user yc-user \
+ --generic-ssh-key ~/.ssh/id_rsa-appuser \
+ ${YC_HOSTNAME}
+
+docker-machine ls
+eval $(docker-machine env ${YC_HOSTNAME})
+docker-machine ssh ${YC_HOSTNAME}
+
+sudo add-apt-repository ppa:longsleep/golang-backports
+sudo apt update
+sudo apt install golang-go
+
+go mod init github.com/yandex-cloud/docker-machine-driver-yandex
+go install github.com/yandex-cloud/docker-machine-driver-yandex@latest
+
+curl -L https://github.com/docker/machine/releases/download/v0.8.2/docker-machine-`uname -s`-`uname -m` >/usr/local/bin/docker-machine && \
+chmod +x /usr/local/bin/docker-machine
+
+export PATH="$PATH:$HOME/go/bin"
+
+```
+
+Создадим сервисную учетную запись
+
+```bash
+export YC_FOLDER_ID='b1g0da3u1gqk0nansi59'
+export SA_KEY_PATH="$HOME/key.json"
+
+yc iam service-account create --name=sa-default --folder-id=$YC_FOLDER_ID
+yc iam key create --service-account-name sa-default --output $SA_KEY_PATH --folder-id $YC_FOLDER_ID
+yc resource-manager folder add-access-binding \
+  --name=infra \
+  --id=$YC_FOLDER_ID \
+  --service-account-id=$(yc iam service-account get sa-default | grep ^id | awk '{print $2}') \
+  --role=editor
+```
+
+В папке подготовил **docker/ansbile** ansible playbook для установки docker-machine `ansible-playbook playbooks/docker-machine_install.yml` и установку go *Yandex.Cloud Docker machine driver*
+
+```bash
+docker-machine -D create \
+--driver yandex \
+--yandex-image-family "ubuntu-2004-lts" \
+--yandex-platform-id "standard-v1" \
+--yandex-folder-id $YC_FOLDER_ID \
+--yandex-sa-key-file $SA_KEY_PATH \
+--yandex-memory "4" \
+--yandex-nat=true \
+logging
+
+eval $(docker-machine env logging)
+docker-machine ip logging
+```
+
+Установка завершается ошибкой, разбираться нет смысла, так как docker-machine не является актуальным и более не поддерживается [Deprecate Docker Machine](https://github.com/docker/roadmap/issues/245).
+
+> Результат:
+
+```output
+Error creating machine: Error running provisioning: Something went wrong running an SSH command!
+command : DEBIAN_FRONTEND=noninteractive sudo -E apt-get install -y  curl
+err     : exit status 100
+output  : E: Could not get lock /var/lib/dpkg/lock-frontend - open (11: Resource temporarily unavailable)
+E: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is another process using it?
+
+...
+Error running SSH command: Something went wrong running an SSH command!
+command : netstat -tln
+err     : exit status 127
+output  : bash: netstat: command not found
+
+
+Error creating machine: Error running provisioning: Unable to verify the Docker daemon is listening: Maximum number of retries (10) exceeded
+```
+
+Дальнейшее разворачивание было выполнено через `terraform` и `ansible`. Файлы установки располагаются в папке `logging/infra/terraform` и `logging/infra/ansible`. Terraform `terraform -chdir=logging/infra/terraform/stage apply` создает машины с именами *docker-host-X* и *docker-logging-X*, запускает `logging/infra/ansible/playbooks/docker_logging.yml`, где выполняется установка docker-compose и запуск контейнеров. Причём адрес fluent сервера указывается изначально при установке из динамического `inventory.json` файла.
+
+### Логирование Docker-контейнеров
+
+[Dockerfile для fluentd](https://docs.fluentd.org/container-deployment/docker-compose) в итоге с различными версиями не взлетел с плагином *fluent-plugin-elasticsearch*
+
+```bash
+mkdir -p logging/fluentd
+
+cat << EOF > logging/fluentd/Dockerfile
+FROM fluent/fluentd:v0.12
+RUN gem install faraday-net_http -v 2.1.0
+RUN gem install faraday -v 1.10.3
+RUN gem install fluent-plugin-elasticsearch --no-rdoc --no-ri --version 1.9.5
+RUN gem install fluent-plugin-grok-parser --no-rdoc --no-ri --version 1.0.0
+COPY --chmod=644 fluent.conf /fluentd/etc
+EOF
+```
+
+> Результат:
+>
+```output
+logging-fluentd-1  | 2023-11-17 21:07:32 +0000 [warn]: temporarily failed to flush the buffer. next_retry=2023-11-17 21:07:32 +0000 error_class="NameError" error="uninitialized constant Elasticsearch::Transport" plugin_id="object:2abd066abb50"
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluent-plugin-elasticsearch-1.9.5/lib/fluent/plugin/out_elasticsearch.rb:147:in `client'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluent-plugin-elasticsearch-1.9.5/lib/fluent/plugin/out_elasticsearch.rb:359:in `rescue in send_bulk'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluent-plugin-elasticsearch-1.9.5/lib/fluent/plugin/out_elasticsearch.rb:354:in `send_bulk'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluent-plugin-elasticsearch-1.9.5/lib/fluent/plugin/out_elasticsearch.rb:341:in `write_objects'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluentd-0.12.43/lib/fluent/output.rb:490:in `write'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluentd-0.12.43/lib/fluent/buffer.rb:354:in `write_chunk'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluentd-0.12.43/lib/fluent/buffer.rb:333:in `pop'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluentd-0.12.43/lib/fluent/output.rb:342:in `try_flush'
+logging-fluentd-1  |   2023-11-17 21:07:32 +0000 [warn]: /usr/lib/ruby/gems/2.5.0/gems/fluentd-0.12.43/lib/fluent/output.rb:149:in `run'
+logging-fluentd-1  | 2023-11-17 21:07:32 +0000 fluent.warn: {"next_retry":"2023-11-17 21:07:32 +0000","error_class":"NameError","error":"uninitialized constant Elasticsearch::Transport","plugin_id":"object:2abd066abb50","message":"temporarily failed to flush the buffer. next_retry=2023-11-17 21:07:32 +0000 error_class=\"NameError\" error=\"uninitialized constant Elasticsearch::Transport\" plugin_id=\"object:2abd066abb50\""}
+```
+
+Принято решение отказаться от fluentd и использовать [fluent-bit](https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch)
+Подсмотрев установку в keubernetes, использовал эти же версии [Kubernetes Observability: логгинг с EFK](https://habr.com/ru/companies/otus/articles/721004/) из блога **Блог компании OTUS, Kubernetes**
+
+В итоге:
+
+```bash
+
+mkdir -p logging/fluent-bit
+
+cat << EOF > logging/fluent-bit/fluent-bit.conf
+[INPUT]
+  name elasticsearch
+  listen 0.0.0.0
+  port 9200
+[OUTPUT]
+  name stdout
+  match *
+[OUTPUT]
+  Name es
+  Match service.*
+  Host elasticsearch
+  Logstash_Format On
+  Logstash_Prefix fluentd
+  Logstash_Dateformat %Y%m%d
+  Include_Tag_Key true
+  Retry_Limit False
+  tls Off
+  tls.verify Off
+  HTTP_User elastic
+  HTTP_Passwd elastic
+  Suppress_Type_Name On
+  Index fluentbit
+  Type docker
+[INPUT]
+  Name forward
+  Listen 0.0.0.0
+  Port 24224
+  Buffer_Chunk_Size 1M
+  Buffer_Max_Size 6M
+[SERVICE]
+  Flush 5
+  Daemon Off
+  Log_Level debug
+EOF
+
+cat << EOF > logging/fluent-bit/Dockerfile
+FROM cr.fluentbit.io/fluent/fluent-bit
+COPY --chmod=644 fluent-bit.conf /fluent-bit/etc/fluent-bit.conf
+EOF
+
+docker buildx build --push -t ${USERNAME}/fluent-bit:logging .
+
+cat << EOF > docker/docker-compose-logging.yml
+version: '3'
+services:
+  fluent-bit:
+    image: ${USERNAME}/fluent-bit:${FLUENTD_VERSION}
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    depends_on:
+      - elasticsearch
+  elasticsearch:
+    image: elasticsearch:7.17.3
+    environment:
+      - discovery.type=single-node
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+  kibana:
+    image: kibana:7.17.3
+    ports:
+      - "5601:5601"
+EOF
+```
+
+Выполнена пересборка образов ui, comment, post c tag'ом - logging и доустановленными пакетами gcc и musl-dev
+
+```bash
+for i in post ui comment; do cd $i && docker buildx build --push -t $USERNAME/$i:logging . && cd - ; done
+```
+
+> Результат см. `logging/README.md`:
+>
+```output
+Apply complete! Resources: 4 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+docker_host_instance = [
+  [
+    "fhma1onfpi80lu9p769r",
+  ],
+  [
+    "docker-host-0",
+  ],
+]
+docker_host_ip_address = "158.160.125.139"
+docker_image_id = "fd853sqaosrb2anl1uve"
+docker_logging_instance = [
+  [
+    "fhmm27372bjc4i5elva1",
+  ],
+  [
+    "docker-logging-0",
+  ],
+]
+docker_logging_ip_address = "158.160.106.143"
+
+ubuntu@fhma1onfpi80lu9p769r:~/docker$ docker-compose ps
+NAME                IMAGE                          COMMAND                  SERVICE             CREATED             STATUS              PORTS
+logging-comment-1   23f03013e37f/comment:logging   "puma"                   comment             7 minutes ago       Up 7 minutes
+logging-post-1      23f03013e37f/post:logging      "python3 post_app.py"    post                7 minutes ago       Up 7 minutes
+logging-post_db-1   mongo:4.4.24                   "docker-entrypoint.s…"   post_db             7 minutes ago       Up 7 minutes        27017/tcp
+logging-ui-1        23f03013e37f/ui:latest         "puma --debug -w 2"      ui                  7 minutes ago       Up 7 minutes        0.0.0.0:9292->9292/tcp, :::9292->9292/tcp
+
+ubuntu@fhmm27372bjc4i5elva1:~/docker$ docker-compose ps
+NAME                      IMAGE                             COMMAND                  SERVICE             CREATED             STATUS              PORTS
+logging-elasticsearch-1   elasticsearch:7.17.3              "/bin/tini -- /usr/l…"   elasticsearch       9 minutes ago       Up 9 minutes        0.0.0.0:9200->9200/tcp, :::9200->9200/tcp, 9300/tcp
+logging-fluentd-1         23f03013e37f/fluent-bit:logging   "/fluent-bit/bin/flu…"   fluentd             9 minutes ago       Up 9 minutes        2020/tcp, 0.0.0.0:24224->24224/tcp, 0.0.0.0:24224->24224/udp, :::24224->24224/tcp, :::24224->24224/udp
+logging-kibana-1          kibana:7.17.3                     "/bin/tini -- /usr/l…"   kibana              9 minutes ago       Up 9 minutes        0.0.0.0:5601->5601/tcp, :::5601->5601/tcp
+```
+
+### Cбор структурированных логов
+
+
+![Reference](img/Screenshot_20231118_100825.png)
+![Reference](img/Screenshot_20231118_101218.png)
+
+### Визуализация
+
+![Reference](img/Screenshot_20231118_103703.png)
+
+### Сбор неструктурированных логов
+
+![Reference](img/Screenshot_20231118_104112.png)
+
+```bash
+mkdir -p logging/fluent-bit
+cat << EOF >> logging/fluent-bit/fluent-bit.conf
+[SERVICE]
+  flush        1
+  log_level    info
+  parsers_file parsers.conf
+[FILTER]
+  Name parser
+  Match service.post
+  Key_Name log
+  Parser json_parser
+[FILTER]
+  Name parser
+  Match service.ui
+  Key_Name log
+  Parser ui_parser
+EOF
+cat << EOF >> logging/fluent-bit/parsers.conf
+[PARSER]
+  Name json_parser
+  Format json
+  Key_Name log
+[PARSER]
+  Name ui_parser
+  Format regex
+  Regex /\[(?<time>[^\]]*)\]  (?<level>\S+) (?<user>\S+)[\W]*service=(?<service>\S+)[\W]*event=(?<event>\S+)[\W]*(?:path=(?<path>\S+)[\W]*)?request_id=(?<request_id>\S+)[\W]*(?:remote_addr=(?<remote_addr>\S+)[\W]*)?(?:method= (?<method>\S+)[\W]*)?(?:response_status=(?<response_status>\S+)[\W]*)?(?:message='(?<message>[^\']*)[\W]*)?/
+  Key_Name log
+EOF
+cat << EOF >> logging/fluent-bit/Dockerfile
+COPY --chmod=644 parsers.conf /fluent-bit/etc/parsers.conf
+EOF
+
+```
+
+Рузультат:
+
+![Reference](Screenshot_20231118_113217.png)
+
+Grok не поддерживается в fluent-bit - [Is there any grok support?](https://github.com/fluent/fluent-bit/issues/723)
+
+### Задание со *
+
+```ouput
+logging-fluentd-1  | [2023/11/18 08:52:46] [ info] ___________
+logging-fluentd-1  | [2023/11/18 08:52:46] [ info]  filters:
+logging-fluentd-1  | [2023/11/18 08:52:46] [ info]      parser.0
+logging-fluentd-1  | [2023/11/18 08:52:46] [ info]      parser.1
+logging-fluentd-1  | [2023/11/18 08:52:46] [ info] ___________
+```
+
+![Reference](img/Screenshot_20231118_115610.png)
+
+### Распределенный трейсинг
+
+![Reference](img/Screenshot_20231118_124132.png)
+
+### Задание со *
+
+Загружено приложение, собрано с tag'ом bugged. Для тестирования подготовлен `docker/docker-commpse-apps.yml`.
+Выполнен запуск и проведен анализ запросов.
+
+Если взять значения по умолчанию, то задржка из-за неверного порта по-умолчанию: 4567
+![Reference](img/Screenshot_20231118_142007.png)
+
+Как выясняется, проблема подключении на порт сервиса post отдается ошибка 500, если в UI указывается ENV на порт 5000 для POST.
+
+![Reference](img/Screenshot_20231118_135215.png)
+![Reference](img/Screenshot_20231118_135339.png)
+
+---
+
 
 ## <a name="hw29">Запуск кластера и приложения. Модель безопасности</a>
 
