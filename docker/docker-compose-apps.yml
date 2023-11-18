@@ -16,6 +16,7 @@ services:
     networks:
       - front_net
     depends_on:
+      - fluent-bit
       - post_db
       - post
       - comment
@@ -38,58 +39,53 @@ services:
       options:
         fluentd-address: localhost:24224
         tag: service.post
+    depends_on:
+      - fluent-bit
   comment:
     image: ${USERNAME}/comment:${COMMENT_VERSION}
     environment:
       - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: service.post
     networks:
       - back_net
       - front_net
-  prometheus:
-    image: ${USERNAME}/prometheus
-    ports:
-      - '9090:9090'
-    volumes:
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention=1d'
-    networks:
-      - back_net
-      - front_net
-  node-exporter:
-    image: prom/node-exporter:v0.15.2
-    user: root
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.ignored-mount-points="^/(sys|proc|dev|host|etc)($$|/)"'
-    networks:
-      - back_net
-      - front_net
-  mongodb-exporter:
-    image: percona/mongodb_exporter:0.30.0
-    command:
-      - '--mongodb.uri=mongodb://post_db:27017'
-      - '--compatible-mode'
-      - '--mongodb.direct-connect=true'
-      - '--log.level=debug'
-    networks:
-      - back_net
     depends_on:
-      - prometheus
-  blackbox-exporter:
-    container_name: blackbox-exporter
-    image: ${USERNAME}/blackbox-exporter
+      - fluent-bit
+  zipkin:
+    image: openzipkin/zipkin:2.21.0
     ports:
-      - '9115:9115/tcp'
+      - "9411:9411"
     networks:
       - back_net
+      - front_net
+  fluent-bit:
+    image: ${USERNAME}/fluent-bit:${FLUENT_VERSION}
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    depends_on:
+      - elasticsearch
+    networks:
+      - back_net
+  elasticsearch:
+    image: elasticsearch:7.17.3
+    environment:
+      - discovery.type=single-node
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+    networks:
+      - back_net
+  kibana:
+    image: kibana:7.17.3
+    ports:
+      - "5601:5601"
+    networks:
       - front_net
 volumes:
   post_db:
