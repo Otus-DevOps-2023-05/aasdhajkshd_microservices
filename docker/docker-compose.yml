@@ -1,5 +1,4 @@
 version: '3.3'
-name: logging
 services:
   post_db:
     image: mongo:${DB_VERSION}
