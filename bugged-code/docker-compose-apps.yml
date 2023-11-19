@@ -1,0 +1,101 @@
+version: '3.3'
+name: logging
+services:
+  post_db:
+    image: mongo:${DB_VERSION}
+    volumes:
+      - post_db:/data/db
+    networks:
+      - back_net
+  ui:
+    image: ${USERNAME}/ui:${UI_VERSION}
+    environment:
+      - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+    ports:
+      - ${PORT}:9292/tcp
+    networks:
+      - front_net
+    depends_on:
+      - fluent-bit
+      - post_db
+      - post
+      - comment
+    command: puma --debug -w 2
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: service.ui
+  post:
+    image: ${USERNAME}/post:${POST_VERSION}
+    environment:
+      - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+      - COMPOSE_PROJECT_NAME
+    networks:
+      - back_net
+      - front_net
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: service.post
+    depends_on:
+      - fluent-bit
+  comment:
+    image: ${USERNAME}/comment:${COMMENT_VERSION}
+    environment:
+      - ZIPKIN_ENABLED=${ZIPKIN_ENABLED}
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: service.post
+    networks:
+      - back_net
+      - front_net
+    depends_on:
+      - fluent-bit
+  zipkin:
+    image: openzipkin/zipkin:2.21.0
+    ports:
+      - "9411:9411"
+    networks:
+      - back_net
+      - front_net
+  fluent-bit:
+    image: ${USERNAME}/fluent-bit:${FLUENT_VERSION}
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    depends_on:
+      - elasticsearch
+    networks:
+      - back_net
+  elasticsearch:
+    image: elasticsearch:7.17.3
+    environment:
+      - discovery.type=single-node
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+    networks:
+      - back_net
+  kibana:
+    image: kibana:7.17.3
+    ports:
+      - "5601:5601"
+    networks:
+      - front_net
+volumes:
+  post_db:
+  prometheus_data:
+networks:
+  front_net:
+    ipam:
+      config:
+        - subnet: 10.0.1.0/24
+  back_net:
+    ipam:
+      config:
+        - subnet: 10.0.2.0/24
